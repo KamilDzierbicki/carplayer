@@ -1,8 +1,10 @@
-# ![CarPlayer logo](icons/favicon.svg) CarPlayer
+# <img src="icons/favicon.svg" alt="CarPlayer logo" height="48" style="vertical-align: middle;"> CarPlayer
 
-A simple web video player that lets passengers, especially kids, watch videos while driving by bypassing standard in-car entertainment restrictions.
+A simple web video player that lets passengers, especially kids, watch videos while driving by bypassing standard in-car
+entertainment restrictions.
 
-> Disclaimer: Use responsibly. This project is intended for passengers only. The driver must stay focused on the road at all times.
+> Disclaimer: Use responsibly. This project is intended for passengers only. The driver must stay focused on the road at
+> all times.
 
 ## How to use in the car
 
@@ -27,16 +29,20 @@ A simple web video player that lets passengers, especially kids, watch videos wh
 
 ## Limitations
 
-- **Easy video link sharing**: Works with any car app that supports sending web links from your smartphone to the vehicle's browser. (If not - you can still type link manually).
-- **Format Support**: Only standard MP4 containers are supported (limited by your browser). Specialized or proprietary codecs may not be compatible (often video will play but without sound becuase of codecs).
-- **YouTube Videos**: Playback is limited to 360p or 720p. This is due to the browser requiring a single multiplexed file (combined audio and video), whereas higher resolutions often use separate streams.
-- **API Requirements**: API key from RapidAPI is required for YouTube functionality. We welcome Pull Requests to support alternative providers, such as the Invidious API if you have any idea on how to solve CORS/proxy issues.
+- **Easy video link sharing**: Works with any car app that supports sending web links from your smartphone to the
+  vehicle's browser. (If not - you can still type link manually).
+- **Format Support**: Only standard MP4 containers are supported (limited by your browser). Specialized or proprietary
+  codecs may not be compatible (often video will play but without sound becuase of codecs).
+- **YouTube Videos**: Playback is limited to 360p or 720p. This is due to the browser requiring a single multiplexed
+  file (combined audio and video), whereas higher resolutions often use separate streams.
+- **API Requirements**: API key from RapidAPI is required for YouTube functionality. We welcome Pull Requests to support
+  alternative providers, such as the Invidious API if you have any idea on how to solve CORS/proxy issues.
 
 ## Screenshots
 
-![CarPlayer screen](demo3.png)
-![CarPlayer screen](demo2.png)
-![CarPlayer screen](demo.png)
+<img src="demo3.png" alt="CarPlayer screen" width="800">
+<img src="demo2.png" alt="CarPlayer screen" width="800">
+<img src="demo.png" alt="CarPlayer screen" width="800">
 
 ## Development
 
@@ -76,18 +82,13 @@ After that, open: `http://localhost:8080/index.html`
 Contributions are welcome.
 
 1. Fork the repository.
-2. Create a feature branch:
-
-   ```bash
-   git checkout -b feature/my-change
-   ```
-
+2. Create a feature branch:`git checkout -b feature/my-change`
 3. Make focused changes in small commits.
 4. Run manual checks locally.
 5. Open a Pull Request with:
-   - what changed,
-   - why it changed,
-   - how it was tested (steps/screenshots/GIF if UI impact).
+    - what changed,
+    - why it changed,
+    - how it was tested (steps/screenshots/GIF if UI impact).
 
 ## License
 
