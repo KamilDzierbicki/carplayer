@@ -354,6 +354,26 @@ export default class PlayerController {
     this.#dom.loader.classList.remove("is-visible");
   }
 
+  #clearTransientUrlParams() {
+    const currentUrlObj = new URL(window.location.href);
+    let hasChanges = false;
+    const transientParams = ["share", "settings", "url", "apikey"];
+
+    transientParams.forEach((param) => {
+      if (!currentUrlObj.searchParams.has(param)) return;
+      currentUrlObj.searchParams.delete(param);
+      hasChanges = true;
+    });
+
+    if (!hasChanges) return;
+
+    window.history.replaceState(
+      {},
+      document.title,
+      `${currentUrlObj.pathname}${currentUrlObj.search}${currentUrlObj.hash}`,
+    );
+  }
+
   #handleBack() {
     const { video, playerScreen, setupScreen } = this.#dom;
 
@@ -364,6 +384,7 @@ export default class PlayerController {
 
     playerScreen.classList.remove("active");
     setupScreen.classList.remove("hidden");
+    this.#clearTransientUrlParams();
     this.#historyRenderer?.render();
   }
 }
