@@ -2018,7 +2018,7 @@
     }
 
     .modal__content {
-      inline-size: min(100%, 31rem);
+      inline-size: min(100%, 40rem);
       border-radius: var(--radius-lg);
       max-block-size: min(100%, calc(100svh - (var(--space-6) * 2)));
       max-block-size: min(100%, calc(100dvh - (var(--space-6) * 2)));
@@ -2026,6 +2026,7 @@
     }
 
     .modal__content--settings {
+      inline-size: min(100%, 44rem);
       padding-block: clamp(1.75rem, 2.8vw, 2.25rem);
       padding-inline: clamp(1.15rem, 2.8vw, 2.25rem);
     }
@@ -2055,7 +2056,7 @@
     }
 
     #urlModal .modal__content {
-      inline-size: min(100%, 34rem);
+      inline-size: min(100%, 42rem);
       gap: var(--space-4);
       padding-block: clamp(1.75rem, 2.8vw, 2.25rem);
       padding-inline: clamp(1.15rem, 2.8vw, 2.25rem);
