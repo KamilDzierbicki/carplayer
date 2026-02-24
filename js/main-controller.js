@@ -68,6 +68,15 @@ export default class MainController {
         this.#clearTransientUrlParams();
       });
     });
+
+    document.querySelectorAll(".modal").forEach((modal) => {
+      modal.addEventListener("click", (event) => {
+        if (event.target !== modal) return;
+        if (!modal.id) return;
+        this.#app.closeModal(modal.id);
+        this.#clearTransientUrlParams();
+      });
+    });
   }
 
   #clearTransientUrlParams() {

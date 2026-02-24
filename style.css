@@ -84,6 +84,10 @@
     --dur-panel: 280ms;
 
     --control-height: 5.25rem;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
   }
 
   html[data-theme="light"] {
@@ -170,7 +174,10 @@
     align-items: center;
     gap: var(--space-4);
     min-block-size: 4.2rem;
-    padding: var(--space-4) var(--space-6);
+    padding-block-start: calc(var(--space-4) + var(--safe-top));
+    padding-block-end: var(--space-4);
+    padding-inline-start: max(var(--space-6), calc(var(--space-5) + var(--safe-left)));
+    padding-inline-end: max(var(--space-6), calc(var(--space-5) + var(--safe-right)));
     border-block-end: 1px solid var(--color-border);
     background: color-mix(in srgb, var(--color-canvas) 92%, transparent);
     backdrop-filter: blur(8px);
@@ -659,9 +666,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: var(--space-6);
+    padding-block-start: max(var(--space-6), calc(var(--space-5) + var(--safe-top)));
+    padding-block-end: max(var(--space-6), calc(var(--space-5) + var(--safe-bottom)));
+    padding-inline-start: max(var(--space-6), calc(var(--space-5) + var(--safe-left)));
+    padding-inline-end: max(var(--space-6), calc(var(--space-5) + var(--safe-right)));
     background: var(--color-overlay);
     backdrop-filter: blur(6px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     opacity: 0;
     pointer-events: none;
     transition: opacity var(--dur-panel) var(--ease-out-expo);
@@ -675,7 +687,8 @@
   .modal__content {
     position: relative;
     inline-size: min(100%, 31rem);
-    max-block-size: min(100%, 90vh);
+    max-block-size: min(100%, calc(100svh - (var(--space-6) * 2)));
+    max-block-size: min(100%, calc(100dvh - (var(--space-6) * 2)));
     overflow-y: auto;
     border-radius: var(--radius-lg);
     border: 1px solid var(--color-border);
@@ -1245,7 +1258,7 @@
     align-items: center;
     gap: var(--space-3);
     padding: 1rem 2.2rem;
-    border: 1px solid var(--color-player-border);
+    border: 0;
     border-radius: var(--radius-round);
     background: var(--color-player-glass-strong);
     backdrop-filter: blur(18px) saturate(118%);
@@ -1293,7 +1306,7 @@
     align-items: center;
     gap: var(--space-5);
     border-radius: var(--radius-xl);
-    border: 1px solid var(--color-player-border);
+    border: 0;
     background: var(--color-player-glass);
     backdrop-filter: blur(22px) saturate(120%);
     -webkit-backdrop-filter: blur(22px) saturate(120%);
@@ -1306,7 +1319,7 @@
 
   .player-controls.idle {
     opacity: 0;
-    transform: translate(-50%, 1.2rem);
+    transform: translateY(1.2rem);
     pointer-events: none;
   }
 
@@ -1385,6 +1398,14 @@
     display: flex;
     align-items: center;
     gap: var(--space-4);
+  }
+
+  .player-stream-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--space-4);
+    flex-shrink: 0;
   }
 
   .volume-control {
@@ -1509,152 +1530,780 @@
     color: white;
   }
 
-  @media (max-width: 64rem) {
-    .app-nav {
-      grid-template-columns: 1fr;
-      gap: var(--space-3);
-      padding: var(--space-4);
+  .app-nav {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand actions"
+      "search search";
+    gap: var(--space-2);
+    min-block-size: auto;
+    padding-block-start: calc(var(--space-4) + var(--safe-top));
+    padding-block-end: var(--space-4);
+    padding-inline-start: max(var(--space-4), calc(var(--space-3) + var(--safe-left)));
+    padding-inline-end: max(var(--space-4), calc(var(--space-3) + var(--safe-right)));
+  }
+
+  .app-brand {
+    grid-area: brand;
+    justify-self: start;
+    font-size: 1.04rem;
+    letter-spacing: 0.02em;
+  }
+
+  .search-bar {
+    grid-area: search;
+    max-inline-size: none;
+    margin-inline: 0;
+    gap: var(--space-1);
+    padding: 0.55rem 0.75rem;
+    border-radius: 0.75rem;
+  }
+
+  .search-bar__input {
+    font-size: 0.9rem;
+  }
+
+  .app-nav__actions {
+    grid-area: actions;
+    inline-size: auto;
+    justify-content: flex-end;
+    justify-self: end;
+    flex-wrap: nowrap;
+    gap: var(--space-2);
+  }
+
+  .btn {
+    min-block-size: 2.45rem;
+    padding-inline: 0.85rem;
+    font-size: 0.92rem;
+  }
+
+  .icon-btn {
+    min-block-size: 2.1rem;
+    padding-inline: var(--space-2);
+  }
+
+  .history-header {
+    padding: var(--space-5) var(--space-3) 0;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+
+  .history-header__title {
+    font-size: 1.1rem;
+  }
+
+  .icon-btn--compact {
+    min-block-size: 1.95rem;
+    font-size: 0.78rem;
+    padding-inline: 0.6rem;
+  }
+
+  .video-grid {
+    grid-template-columns: 1fr;
+    padding: var(--space-4) var(--space-3) var(--space-5);
+    gap: var(--space-4);
+  }
+
+  .tile-title {
+    font-size: 0.9rem;
+  }
+
+  #playerScreen {
+    align-items: stretch;
+    justify-content: stretch;
+  }
+
+  #mediaContainer {
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  #videoCanvas {
+    inline-size: 100%;
+    block-size: 100%;
+    max-inline-size: none;
+    max-block-size: none;
+  }
+
+  .player-controls {
+    inset-inline-start: max(var(--space-2), calc(var(--space-2) + var(--safe-left)));
+    inset-inline-end: max(var(--space-2), calc(var(--space-2) + var(--safe-right)));
+    inset-block-end: max(var(--space-1), calc(var(--space-1) + var(--safe-bottom)));
+    transform: none;
+    inline-size: auto;
+    min-block-size: auto;
+    border-radius: 0;
+    gap: 0.45rem 0.65rem;
+    padding: 1.1rem 0.55rem 0.42rem;
+    display: grid;
+    grid-template-columns: auto minmax(8.2rem, 1fr) auto;
+    grid-template-areas:
+      "stream stream stream"
+      "progress progress progress"
+      "play time tools";
+    align-items: center;
+    border: 0;
+    background: color-mix(in srgb, var(--color-surface-1) 44%, transparent);
+    backdrop-filter: blur(16px) saturate(124%) brightness(1.02);
+    -webkit-backdrop-filter: blur(16px) saturate(124%) brightness(1.02);
+    box-shadow: 0 0.45rem 1.45rem color-mix(in srgb, black 42%, transparent);
+
+    #playPauseBtn {
+      grid-area: play;
+      position: static;
+      inset: auto;
+      transform: none;
+      inline-size: 3rem;
+      block-size: 3rem;
+      border-radius: 50%;
+      border: 0;
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: none;
+      z-index: 60;
     }
 
-    .app-brand,
+    .player-time {
+      grid-area: time;
+      text-align: left;
+      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      min-inline-size: 8.2rem;
+      font-size: 0.8rem;
+      letter-spacing: 0.01em;
+    }
+
+  .progress {
+    grid-area: progress;
+    min-block-size: 1.25rem;
+  }
+
+  .player-stream-controls {
+    grid-area: stream;
+    inline-size: 100%;
+    gap: 0.45rem;
+  }
+
+  .player-tools {
+    grid-area: tools;
+    min-inline-size: 4.8rem;
+    inline-size: auto;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.35rem;
+      flex-wrap: nowrap;
+    }
+  }
+
+  .player-time {
+    min-inline-size: 8.2rem;
+    font-size: 0.8rem;
+  }
+
+  .volume-control {
+    gap: var(--space-2);
+  }
+
+  .volume-slider {
+    inline-size: 2rem;
+  }
+
+  .select {
+    min-block-size: 1.72rem;
+    padding-inline: 0.32rem;
+    font-size: 0.63rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    border-radius: 0.5rem;
+  }
+
+  .select--quality {
+    min-inline-size: 5.9rem;
+    max-inline-size: none;
+    inline-size: 5.9rem;
+  }
+
+  .select--speed {
+    min-inline-size: 2.7rem;
+  }
+
+  .modal {
+    align-items: flex-end;
+    padding-block-start: max(var(--space-3), calc(var(--space-3) + var(--safe-top)));
+    padding-block-end: max(var(--space-3), calc(var(--space-3) + var(--safe-bottom)));
+    padding-inline-start: max(var(--space-3), calc(var(--space-2) + var(--safe-left)));
+    padding-inline-end: max(var(--space-3), calc(var(--space-2) + var(--safe-right)));
+  }
+
+  .modal__content {
+    inline-size: 100%;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    max-block-size: min(100%, calc(100svh - var(--safe-top) - var(--safe-bottom) - (var(--space-3) * 2)));
+    max-block-size: min(100%, calc(100dvh - var(--safe-top) - var(--safe-bottom) - (var(--space-3) * 2)));
+    padding: var(--space-5) var(--space-3) calc(var(--space-5) + var(--safe-bottom));
+  }
+
+  .modal__content--settings {
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-3) calc(var(--space-4) + var(--safe-bottom));
+  }
+
+  .modal__content--settings .modal__title {
+    font-size: 1.45rem;
+    padding-inline-end: 2rem;
+  }
+
+  .modal__content--settings .section-note {
+    font-size: 0.9rem;
+    line-height: 1.54;
+  }
+
+  .modal__content--settings .steps {
+    padding-block-start: var(--space-5);
+    gap: var(--space-5);
+  }
+
+  .modal__content--settings .step__title {
+    font-size: 0.98rem;
+  }
+
+  .modal__content--settings .step__desc {
+    font-size: 0.89rem;
+    line-height: 1.52;
+  }
+
+  #urlModal .modal__content {
+    gap: var(--space-4);
+    padding: var(--space-4) var(--space-3) calc(var(--space-4) + var(--safe-bottom));
+  }
+
+  #urlModal .modal__title {
+    font-size: 1.4rem;
+    padding-inline-end: 2rem;
+  }
+
+  #urlModal .qr-flow {
+    gap: var(--space-4);
+  }
+
+  #urlModal .step-list__title {
+    font-size: 1rem;
+  }
+
+  #urlModal .step__desc {
+    font-size: 0.89rem;
+    line-height: 1.5;
+  }
+
+  .player-topbar {
+    inset-inline-start: max(var(--space-3), calc(var(--space-2) + var(--safe-left)));
+    inset-inline-end: max(var(--space-3), calc(var(--space-2) + var(--safe-right)));
+    inset-block-start: max(var(--space-3), calc(var(--space-2) + var(--safe-top)));
+    gap: var(--space-3);
+    padding: 0;
+    border-radius: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .player-title {
+    max-inline-size: calc(100vw - 9.2rem - var(--safe-left) - var(--safe-right));
+    font-size: 0.88rem;
+  }
+
+  @media (orientation: portrait) and (max-width: 767px) {
+    #playPauseBtn {
+      position: static !important;
+      inset: auto !important;
+      transform: none !important;
+      z-index: 120 !important;
+    }
+
+    .player-controls.idle {
+      opacity: 1;
+      transform: none;
+      pointer-events: auto;
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+  .player-controls.idle .progress,
+  .player-controls.idle .player-stream-controls,
+  .player-controls.idle .player-time,
+  .player-controls.idle .player-tools {
+    opacity: 0;
+    visibility: hidden;
+      pointer-events: none;
+    }
+
+    .player-controls.idle #playPauseBtn {
+      opacity: 1;
+      visibility: visible;
+      pointer-events: auto;
+    }
+  }
+
+  .skip-indicator {
+    padding: 0.8rem 1.4rem;
+    font-size: 1rem;
+  }
+
+  @media (min-width: 481px) {
+    #mediaContainer {
+      padding: 0;
+    }
+
+    .app-nav {
+      gap: var(--space-3);
+      min-block-size: 4.2rem;
+    }
+
+    .app-brand {
+      font-size: 1.18rem;
+      letter-spacing: 0.04em;
+    }
+
+    .search-bar {
+      gap: var(--space-2);
+      padding: var(--space-2) var(--space-4);
+      border-radius: var(--radius-md);
+    }
+
+    .search-bar__input {
+      font-size: 0.95rem;
+    }
+
     .app-nav__actions {
-      justify-self: center;
+      gap: var(--space-3);
+    }
+
+    .btn {
+      min-block-size: 2.8rem;
+      padding-inline: 1rem;
+      font-size: 1rem;
+    }
+
+    .icon-btn {
+      min-block-size: 2.35rem;
+      padding-inline: var(--space-3);
+    }
+
+    .history-header {
+      padding: var(--space-6) var(--space-4) 0;
+      gap: 0;
+      flex-wrap: nowrap;
+    }
+
+    .history-header__title {
+      font-size: 1.25rem;
+    }
+
+    .icon-btn--compact {
+      min-block-size: 2.1rem;
+      font-size: 0.87rem;
+      padding-inline: 0.7rem;
+    }
+
+    .video-grid {
+      padding: var(--space-6) var(--space-4);
+      gap: var(--space-6);
+    }
+
+    .tile-title {
+      font-size: 0.95rem;
+    }
+
+    .modal__content {
+      padding: var(--space-6) var(--space-4) calc(var(--space-6) + var(--safe-bottom));
+    }
+
+    .modal__content--settings {
+      padding: var(--space-5) var(--space-4) calc(var(--space-5) + var(--safe-bottom));
+    }
+
+    #urlModal .modal__content {
+      padding: var(--space-5) var(--space-4) calc(var(--space-5) + var(--safe-bottom));
+    }
+
+    .player-controls {
+      padding: 0.7rem 0.85rem 0.8rem;
+      gap: 0.55rem 0.75rem;
+    }
+
+    .player-time {
+      font-size: 0.8rem;
+      min-inline-size: 8.2rem;
+    }
+
+    .volume-slider {
+      inline-size: 3.9rem;
+    }
+
+    .select {
+      min-block-size: 2rem;
+      font-size: 0.74rem;
+    }
+
+    .select--quality {
+      min-inline-size: 6.25rem;
+      inline-size: 6.25rem;
+      max-inline-size: 6.8rem;
+    }
+
+    .select--speed {
+      min-inline-size: 3.5rem;
+    }
+  }
+
+  @media (min-width: 768px) {
+    #playerScreen {
+      align-items: center;
+      justify-content: center;
+    }
+
+    #mediaContainer {
+      align-items: center;
+      justify-content: center;
+      padding-block: 0;
+    }
+
+    #videoCanvas {
+      inline-size: 100%;
+      block-size: 100%;
+      max-inline-size: none;
+      max-block-size: none;
+    }
+
+    .app-nav {
+      grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr) auto;
+      grid-template-areas: none;
+      gap: var(--space-3);
+      padding-block-start: calc(var(--space-4) + var(--safe-top));
+      padding-block-end: var(--space-4);
+      padding-inline-start: max(var(--space-4), calc(var(--space-3) + var(--safe-left)));
+      padding-inline-end: max(var(--space-4), calc(var(--space-3) + var(--safe-right)));
+    }
+
+    .app-brand {
+      grid-area: auto;
+      justify-self: auto;
+    }
+
+    .search-bar {
+      grid-area: auto;
+      max-inline-size: 36rem;
+      margin-inline: auto;
+    }
+
+    .app-nav__actions {
+      grid-area: auto;
+      inline-size: auto;
+      justify-content: flex-end;
+      justify-self: auto;
+      flex-wrap: nowrap;
+      gap: var(--space-3);
+    }
+
+    .modal {
+      align-items: center;
+      padding-block-start: max(var(--space-6), calc(var(--space-5) + var(--safe-top)));
+      padding-block-end: max(var(--space-6), calc(var(--space-5) + var(--safe-bottom)));
+      padding-inline-start: max(var(--space-6), calc(var(--space-5) + var(--safe-left)));
+      padding-inline-end: max(var(--space-6), calc(var(--space-5) + var(--safe-right)));
+    }
+
+    .modal__content {
+      inline-size: min(100%, 31rem);
+      border-radius: var(--radius-lg);
+      max-block-size: min(100%, calc(100svh - (var(--space-6) * 2)));
+      max-block-size: min(100%, calc(100dvh - (var(--space-6) * 2)));
+      padding: var(--space-7);
+    }
+
+    .modal__content--settings {
+      padding-block: clamp(1.75rem, 2.8vw, 2.25rem);
+      padding-inline: clamp(1.15rem, 2.8vw, 2.25rem);
+    }
+
+    .modal__content--settings .modal__title {
+      font-size: clamp(1.55rem, 2.4vw, 1.9rem);
+      padding-inline-end: 2.4rem;
+    }
+
+    .modal__content--settings .section-note {
+      font-size: 0.94rem;
+      line-height: 1.58;
+    }
+
+    .modal__content--settings .steps {
+      padding-block-start: var(--space-6);
+      gap: var(--space-6);
+    }
+
+    .modal__content--settings .step__title {
+      font-size: 1.03rem;
+    }
+
+    .modal__content--settings .step__desc {
+      font-size: 0.96rem;
+      line-height: 1.62;
+    }
+
+    #urlModal .modal__content {
+      inline-size: min(100%, 34rem);
+      gap: var(--space-4);
+      padding-block: clamp(1.75rem, 2.8vw, 2.25rem);
+      padding-inline: clamp(1.15rem, 2.8vw, 2.25rem);
+    }
+
+    #urlModal .modal__title {
+      font-size: clamp(1.5rem, 2.4vw, 1.82rem);
+      padding-inline-end: 2.4rem;
+    }
+
+    #urlModal .qr-flow {
+      gap: var(--space-5);
+    }
+
+    #urlModal .step-list__title {
+      font-size: 1.07rem;
+    }
+
+    #urlModal .step__desc {
+      font-size: 0.96rem;
+      line-height: 1.58;
+    }
+
+    .video-grid {
+      grid-template-columns: repeat(auto-fill, minmax(17.5rem, 1fr));
+      gap: var(--space-5);
+    }
+
+    .player-topbar {
+      inset-inline: 1.9rem;
+      inset-block-start: 1.9rem;
+      padding: 0;
+      border-radius: 0;
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+
+    .player-title {
+      max-inline-size: calc(100vw - 13rem);
+      font-size: 1.05rem;
+    }
+
+    .player-controls {
+      inset-inline-start: max(var(--space-5), calc(var(--space-4) + var(--safe-left)));
+      inset-inline-end: max(var(--space-5), calc(var(--space-4) + var(--safe-right)));
+      inset-block-end: max(var(--space-4), calc(var(--space-3) + var(--safe-bottom)));
+      transform: none;
+      inline-size: auto;
+      min-block-size: auto;
+      border-radius: 1.15rem;
+      padding: 0.82rem 1rem 0.95rem;
+      gap: 0.65rem 0.9rem;
+      display: grid;
+      grid-template-columns: auto auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        "stream stream stream stream"
+        "progress progress progress progress"
+        "play time . tools";
+      row-gap: 0.65rem;
+      box-shadow: 0 1rem 2.2rem color-mix(in srgb, black 46%, transparent);
+    }
+
+    .player-controls.idle {
+      transform: translateY(1.2rem);
+    }
+
+    .player-controls #playPauseBtn {
+      grid-area: play;
+      position: static;
+      inset: auto;
+      transform: none;
+      inline-size: 3rem;
+      block-size: 3rem;
+      border-radius: 50%;
+      border: 0;
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      box-shadow: none;
+      z-index: auto;
+    }
+
+    .player-controls .player-time {
+      grid-area: time;
+      text-align: start;
+      min-inline-size: auto;
+      font-size: 0.9rem;
+    }
+
+    .player-controls .progress {
+      grid-area: progress;
+      min-block-size: 1.6rem;
+    }
+
+    .player-controls .player-stream-controls {
+      grid-area: stream;
+      inline-size: 100%;
+      display: flex;
+      justify-content: flex-end;
+      gap: var(--space-3);
+    }
+
+    .player-controls .player-tools {
+      grid-area: tools;
+      display: flex;
+      inline-size: auto;
+      justify-content: flex-end;
+      flex-wrap: nowrap;
+      column-gap: 0;
+      gap: var(--space-4);
+    }
+
+    .player-controls .volume-slider {
+      inline-size: 5rem;
+    }
+
+    .player-controls .select {
+      min-block-size: 2.3rem;
+      padding-inline: 0.75rem;
+      font-size: 0.8rem;
+    }
+
+    .player-controls .select--quality {
+      min-inline-size: 6.25rem;
+      max-inline-size: none;
+    }
+
+    .player-controls .select--speed {
+      min-inline-size: 4.25rem;
+    }
+
+    .skip-indicator {
+      padding: 1rem 2.2rem;
+      font-size: 1.35rem;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    .app-nav {
+      grid-template-columns: minmax(10rem, 15rem) minmax(0, 1fr) auto;
+      grid-template-areas: none;
+      gap: var(--space-4);
+      padding-block-start: calc(var(--space-4) + var(--safe-top));
+      padding-block-end: var(--space-4);
+      padding-inline-start: max(var(--space-6), calc(var(--space-5) + var(--safe-left)));
+      padding-inline-end: max(var(--space-6), calc(var(--space-5) + var(--safe-right)));
+    }
+
+    .app-brand {
+      grid-area: auto;
+      justify-self: auto;
+    }
+
+    .search-bar {
+      grid-area: auto;
+      max-inline-size: 36rem;
+      margin-inline: auto;
+    }
+
+    .app-nav__actions {
+      grid-area: auto;
+      inline-size: auto;
+      justify-content: flex-end;
+      justify-self: auto;
+      flex-wrap: nowrap;
+      gap: var(--space-3);
+    }
+
+    .history-header {
+      padding: var(--space-6) var(--space-6) 0;
+    }
+
+    .video-grid {
+      padding: var(--space-6);
+    }
+
+    .player-controls {
+      padding-inline: var(--space-6);
+      gap: var(--space-5);
+    }
+
+    .player-controls .player-time {
+      min-inline-size: 7rem;
+      font-size: 0.92rem;
+    }
+
+    .select {
+      font-size: 0.85rem;
+    }
+  }
+
+  @media (min-width: 1280px) {
+    .app-nav {
+      padding-inline-start: max(var(--space-7), calc(var(--space-6) + var(--safe-left)));
+      padding-inline-end: max(var(--space-7), calc(var(--space-6) + var(--safe-right)));
     }
 
     .history-header,
     .video-grid {
-      padding-inline: var(--space-4);
-    }
-
-    .player-controls {
-      gap: var(--space-3);
-      padding-inline: var(--space-4);
-    }
-
-    .player-time {
-      min-inline-size: 5.8rem;
-      font-size: 0.82rem;
-    }
-
-    .select {
-      font-size: 0.75rem;
-    }
-  }
-
-  @media (max-width: 48rem) {
-    .modal {
-      align-items: flex-end;
-      padding: var(--space-3);
-    }
-
-    .modal__content {
-      inline-size: 100%;
-      border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-      max-block-size: 92vh;
-      padding: var(--space-6);
-    }
-
-    .modal__content--settings {
-      gap: var(--space-4);
-      padding: var(--space-5) var(--space-4);
-    }
-
-    .modal__content--settings .modal__title {
-      font-size: 1.45rem;
-      padding-inline-end: 2rem;
-    }
-
-    .modal__content--settings .section-note {
-      font-size: 0.9rem;
-      line-height: 1.54;
-    }
-
-    .modal__content--settings .steps {
-      padding-block-start: var(--space-5);
-      gap: var(--space-5);
-    }
-
-    .modal__content--settings .step__title {
-      font-size: 0.98rem;
-    }
-
-    .modal__content--settings .step__desc {
-      font-size: 0.89rem;
-      line-height: 1.52;
-    }
-
-    #urlModal .modal__content {
-      gap: var(--space-4);
-      padding: var(--space-5) var(--space-4);
-    }
-
-    #urlModal .modal__title {
-      font-size: 1.4rem;
-      padding-inline-end: 2rem;
-    }
-
-    #urlModal .qr-flow {
-      gap: var(--space-4);
-    }
-
-    #urlModal .step-list__title {
-      font-size: 1rem;
-    }
-
-    #urlModal .step__desc {
-      font-size: 0.89rem;
-      line-height: 1.5;
+      inline-size: min(100%, 110rem);
     }
 
     .video-grid {
-      grid-template-columns: 1fr;
       gap: var(--space-6);
     }
+  }
 
-    .player-topbar {
-      inset-inline: var(--space-4);
-      inset-block-start: var(--space-4);
-    }
-
-    .player-title {
-      max-inline-size: calc(100vw - 9.5rem);
-      font-size: 0.93rem;
-    }
-
-    .player-controls {
-      inset-block-end: var(--space-4);
-      inline-size: calc(100% - var(--space-4));
-      min-block-size: 4.5rem;
-      border-radius: 1.1rem;
-      display: grid;
-      grid-template-columns: auto 1fr auto;
-      grid-template-areas:
-        "play progress tools"
-        "time progress tools";
-      row-gap: var(--space-1);
+  @media (orientation: landscape) and (max-height: 560px) and (hover: none) and (pointer: coarse) {
+    .app-nav {
+      position: relative;
+      display: flex;
+      flex-wrap: wrap;
       align-items: center;
-
-      #playPauseBtn {
-        grid-area: play;
-      }
-
-      .player-time {
-        grid-area: time;
-        text-align: start;
-      }
-
-      .progress {
-        grid-area: progress;
-      }
-
-      .player-tools {
-        grid-area: tools;
-      }
+      row-gap: var(--space-2);
+      column-gap: var(--space-2);
+      min-block-size: auto;
+      padding-block-start: max(var(--space-2), calc(var(--space-2) + var(--safe-top)));
+      padding-block-end: var(--space-2);
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
     }
 
-    .skip-indicator {
-      padding: 0.8rem 1.4rem;
-      font-size: 1rem;
+    .app-brand {
+      order: 1;
+      flex: 0 1 auto;
+      min-inline-size: 0;
+    }
+
+    .app-nav__actions {
+      order: 2;
+      margin-inline-start: auto;
+      flex: 0 0 auto;
+      gap: var(--space-2);
+    }
+
+    .search-bar {
+      order: 3;
+      flex: 1 0 100%;
+      max-inline-size: none;
+      margin-inline: 0;
+    }
+
+    .history-header {
+      padding-block-start: var(--space-3);
     }
   }
 }

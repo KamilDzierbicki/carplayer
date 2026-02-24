@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>CarPlayer - Watch Video</title>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
@@ -252,14 +252,7 @@
         </div>
       </div>
 
-      <div class="player-tools">
-        <div class="volume-control">
-          <button class="icon-btn icon-btn--control icon-btn--small" id="muteBtn" type="button">
-            <span class="icon icon--md icon-mask icon-mask--volume" aria-hidden="true"></span>
-          </button>
-          <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1" step="0.01" value="1" />
-        </div>
-
+      <div class="player-stream-controls">
         <select class="select select--quality hidden" id="qualitySelect" title="Video Quality"></select>
 
         <select class="select select--speed" id="speedSelect" title="Playback Speed">
@@ -287,6 +280,15 @@
           <option value="2.4">2.4x</option>
           <option value="2.5">2.5x</option>
         </select>
+      </div>
+
+      <div class="player-tools">
+        <div class="volume-control">
+          <button class="icon-btn icon-btn--control icon-btn--small" id="muteBtn" type="button">
+            <span class="icon icon--md icon-mask icon-mask--volume" aria-hidden="true"></span>
+          </button>
+          <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1" step="0.01" value="1" />
+        </div>
       </div>
     </div>
   </div>
