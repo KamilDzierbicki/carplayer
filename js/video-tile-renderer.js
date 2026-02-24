@@ -3,9 +3,11 @@ export default class VideoTileRenderer {
     id,
     title,
     fullUrl,
-    isYouTube,
-    youtubeVideoId,
+    sourceType = "url",
+    sourceId = "",
+    sourceServerBaseUrl = "",
     thumbnailUrl,
+    placeholderThumbnailUrl,
     progressPercent,
   }) {
     const safeTitle = String(title || "");
@@ -14,113 +16,134 @@ export default class VideoTileRenderer {
     const encodedTitle = encodeURIComponent(safeTitle);
     const escapedTitleAttr = this.#escapeAttr(safeTitle);
     const titleHtml = this.#escapeHtml(safeTitle);
-    const playData = isYouTube
-      ? `data-video-id="${youtubeVideoId}" data-video-title="${encodedTitle}"`
-      : `data-video-url="${encodedFullUrl}"`;
-    const playType = isYouTube ? "youtube" : "url";
-    const thumbnailHtml = this.#buildHistoryThumbnail({
-      isYouTube,
-      youtubeVideoId,
-      encodedTitle,
-      encodedFullUrl,
-      encodedId,
-      thumbnailUrl,
-      progressPercent,
-    });
+    const safeSourceId = this.#escapeAttr(String(sourceId || ""));
+    const safeSourceServerBaseUrl = this.#escapeAttr(String(sourceServerBaseUrl || ""));
+    const playType = sourceType === "jellyfin" ? "jellyfin" : "url";
 
-    const tile = document.createElement("div");
-    tile.className = "video-tile";
-    tile.innerHTML = `
-      ${thumbnailHtml}
-      <div class="tile-info">
-        <div class="tile-title" data-action="play-video" data-play-type="${playType}" ${playData} title="${escapedTitleAttr}">${titleHtml}</div>
-      </div>
-    `;
-    return tile;
-  }
-
-  static createYouTubeSearchTile({
-    id,
-    title,
-    durationText,
-    thumbnailUrl,
-    channelName,
-    viewCountText,
-  }) {
-    const safeIdAttr = this.#escapeAttr(String(id || ""));
-    const safeTitle = String(title || "");
-    const safeChannelName = String(channelName || "");
-    const safeViews = String(viewCountText || "");
-    const safeDuration = String(durationText || "");
-    const encodedTitle = encodeURIComponent(safeTitle);
-    const escapedTitleAttr = this.#escapeAttr(safeTitle);
-    const safeThumbnailUrl = this.#escapeUrlForCss(thumbnailUrl);
-    const titleHtml = this.#escapeHtml(safeTitle);
-    const metaHtml = this.#escapeHtml(`${safeChannelName} • ${safeViews}`);
-    const durationHtml = this.#escapeHtml(safeDuration);
-
-    const tile = document.createElement("div");
-    tile.className = "video-tile";
-    tile.innerHTML = `
-      <div class="tile-thumbnail tile-thumbnail--cover" data-action="play-video" data-play-type="youtube" data-video-id="${safeIdAttr}" data-video-title="${encodedTitle}" style="background-image: url('${safeThumbnailUrl}');">
-        <div class="duration-badge">${durationHtml}</div>
-      </div>
-      <div class="tile-info">
-        <div class="tile-title" data-action="play-video" data-play-type="youtube" data-video-id="${safeIdAttr}" data-video-title="${encodedTitle}" title="${escapedTitleAttr}">${titleHtml}</div>
-      </div>
-      <div class="video-meta">${metaHtml}</div>
-    `;
-    return tile;
-  }
-
-  static #buildHistoryThumbnail({
-    isYouTube,
-    youtubeVideoId,
-    encodedTitle,
-    encodedFullUrl,
-    encodedId,
-    thumbnailUrl,
-    progressPercent,
-  }) {
-    const safeYoutubeVideoId = this.#escapeAttr(String(youtubeVideoId || ""));
-    const safeThumbUrl = this.#escapeUrlForCss(thumbnailUrl);
     const safeProgress = Number.isFinite(progressPercent) ? progressPercent : 0;
-    const actionsHtml = this.#buildHistoryActions({
-      encodedId,
-      encodedFullUrl,
-    });
     const progressHtml = `
       <div class="tile-progress-container">
         <div class="tile-progress-fill" style="width: ${safeProgress}%;"></div>
       </div>
     `;
 
-    if (isYouTube) {
-      return `
-        <div class="tile-thumbnail tile-thumbnail--cover" data-action="play-video" data-play-type="youtube" data-video-id="${safeYoutubeVideoId}" data-video-title="${encodedTitle}" style="background-image: url('${safeThumbUrl}');">
-          ${actionsHtml}
-          ${progressHtml}
-        </div>
-      `;
+    const actionsHtml = this.#buildHistoryActions({
+      encodedId,
+      encodedFullUrl,
+      sourceType,
+      sourceId,
+      sourceServerBaseUrl,
+    });
+
+    const activeThumbUrl = sourceType === "jellyfin"
+      ? (this.#escapeUrlForCss(placeholderThumbnailUrl) || this.#escapeUrlForCss(thumbnailUrl))
+      : (this.#escapeUrlForCss(placeholderThumbnailUrl) || this.#escapeUrlForCss(thumbnailUrl) || "");
+
+    const thumbnailHtml = this.#buildSharedThumbnail({
+      activeThumbUrl,
+      progressHtml,
+      actionsHtml
+    });
+
+    const tile = document.createElement("div");
+    tile.className = "video-tile";
+    tile.setAttribute("data-action", "play-video");
+    tile.setAttribute("data-play-type", playType);
+    if (playType === "jellyfin") {
+      tile.setAttribute("data-item-id", safeSourceId);
+      tile.setAttribute("data-server-base-url", safeSourceServerBaseUrl);
+      tile.setAttribute("data-video-title", encodedTitle);
+    } else {
+      tile.setAttribute("data-video-url", encodedFullUrl);
     }
 
+    tile.innerHTML = `
+      ${thumbnailHtml}
+      <div class="tile-info">
+        <div class="tile-title" title="${escapedTitleAttr}">${titleHtml}</div>
+      </div>
+    `;
+    return tile;
+  }
+
+  static createJellyfinSearchTile({
+    id,
+    title,
+    durationText,
+    thumbnailUrl,
+    typeText,
+    year,
+    serverBaseUrl,
+  }) {
+    const safeIdAttr = this.#escapeAttr(String(id || ""));
+    const safeTitle = String(title || "");
+    const safeType = String(typeText || "");
+    const safeYear = Number(year) > 0 ? String(year) : "";
+    const safeDuration = String(durationText || "");
+    const safeServerBaseUrl = this.#escapeAttr(String(serverBaseUrl || ""));
+    const encodedTitle = encodeURIComponent(safeTitle);
+    const escapedTitleAttr = this.#escapeAttr(safeTitle);
+    const safeThumbnailUrl = this.#escapeUrlForCss(thumbnailUrl);
+    const titleHtml = this.#escapeHtml(safeTitle);
+    const metaText = [safeType, safeYear].filter(Boolean).join(" • ");
+    const metaHtml = this.#escapeHtml(metaText);
+    const durationHtml = this.#escapeHtml(safeDuration);
+
+    const tile = document.createElement("div");
+    tile.className = "video-tile";
+    tile.setAttribute("data-action", "play-video");
+    tile.setAttribute("data-play-type", "jellyfin");
+    tile.setAttribute("data-item-id", safeIdAttr);
+    tile.setAttribute("data-server-base-url", safeServerBaseUrl);
+    tile.setAttribute("data-video-title", encodedTitle);
+
+    const thumbnailHtml = this.#buildSharedThumbnail({
+      activeThumbUrl: safeThumbnailUrl,
+      durationHtml
+    });
+
+    tile.innerHTML = `
+      ${thumbnailHtml}
+      <div class="tile-info">
+        <div class="tile-title" title="${escapedTitleAttr}">${titleHtml}</div>
+      </div>
+      <div class="video-meta">${metaHtml}</div>
+    `;
+    return tile;
+  }
+
+  static #buildSharedThumbnail({ activeThumbUrl, durationHtml, progressHtml, actionsHtml }) {
+    const hasThumb = Boolean(activeThumbUrl);
+    const thumbClass = hasThumb ? "tile-thumbnail tile-thumbnail--cover" : "tile-thumbnail";
+    const thumbStyle = hasThumb ? ` style="background-image: url('${activeThumbUrl}');"` : "";
+
     return `
-      <div class="tile-thumbnail" data-action="play-video" data-play-type="url" data-video-url="${encodedFullUrl}">
-        <span class="icon icon-mask icon-mask--play-circle" aria-hidden="true"></span>
-        ${actionsHtml}
-        ${progressHtml}
+      <div class="${thumbClass}"${thumbStyle}>
+        ${durationHtml ? `<div class="duration-badge">${durationHtml}</div>` : ""}
+        ${actionsHtml || ""}
+        ${progressHtml || ""}
       </div>
     `;
   }
 
-  static #buildHistoryActions({ encodedId, encodedFullUrl }) {
+  static #buildHistoryActions({
+    encodedId,
+    encodedFullUrl,
+    sourceType,
+    sourceId,
+    sourceServerBaseUrl,
+  }) {
+    const shareData = sourceType === "jellyfin"
+      ? `data-share-type="jellyfin" data-item-id="${this.#escapeAttr(String(sourceId || ""))}" data-server-base-url="${this.#escapeAttr(String(sourceServerBaseUrl || ""))}"`
+      : `data-video-url="${encodedFullUrl}" data-share-type="url"`;
+
     return `
       <div class="tile-actions">
         <button class="tile-action-btn" data-action="remove-history" data-history-id="${encodedId}" title="Remove from history" type="button">
           <span class="icon icon--sm icon-mask icon-mask--close" aria-hidden="true"></span>
         </button>
       </div>
-      <button class="tile-share-btn-bottom" data-action="share-video" data-video-url="${encodedFullUrl}" title="Send to Car" type="button">
+      <button class="tile-share-btn-bottom" data-action="share-video" ${shareData} title="Share link" type="button">
         <span class="icon icon--sm icon-mask icon-mask--share" aria-hidden="true"></span>
       </button>
     `;

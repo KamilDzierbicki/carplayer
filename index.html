@@ -7,6 +7,7 @@
   <title>CarPlayer - Watch Video</title>
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
 </head>
@@ -14,7 +15,7 @@
 <body>
   <div id="setupScreen">
     <div class="app-nav">
-      <a href="#" id="logoLink" class="app-brand">
+      <a href="#" id="logoLink" class="app-brand" onclick="window.location.reload(); return false;">
         <img class="icon icon--md" src="icons/favicon.svg" alt="CarPlayer Logo" />
         CarPlayer
       </a>
@@ -22,8 +23,8 @@
       <div class="search-bar">
         <span class="icon icon--sm icon-mask icon-mask--search search-bar__icon" aria-hidden="true"></span>
         <form action="javascript:void(0);" class="search-bar__form">
-          <input type="text" id="searchInput" name="video_search_query" autocomplete="on" placeholder="Search on YouTube"
-            class="search-bar__input" />
+          <input type="text" id="searchInput" name="video_search_query" autocomplete="on"
+            placeholder="Search on Jellyfin" class="search-bar__input" />
         </form>
         <button class="field-clear field-clear--inline" id="clearSearchBtn" title="Clear Search" type="button">
           ✕
@@ -34,6 +35,16 @@
         <button class="btn btn--dark" id="btnOpenUrlModal">
           <span class="icon icon--sm icon-mask icon-mask--plus" aria-hidden="true"></span>
           Add Video
+        </button>
+
+        <button class="btn btn--dark" id="btnOpenLinkRelayModal">
+          <span class="icon icon--sm icon-mask icon-mask--share" aria-hidden="true"></span>
+          Send Link
+        </button>
+
+        <button class="btn btn--dark" id="btnFullscreenTesla" type="button">
+          <span class="icon icon--sm icon-mask icon-mask--fullscreen" aria-hidden="true"></span>
+          Fullscreen (Tesla)
         </button>
 
         <button class="icon-btn" id="btnOpenSettings" title="Settings" type="button">
@@ -62,72 +73,65 @@
       </button>
       <h2 class="modal__title">Settings</h2>
       <p class="section-note">
-        To enable YouTube functionality, you need a free API Key from
-        <a href="https://rapidapi.com/ytjar/api/yt-api/pricing" target="_blank" rel="noopener noreferrer" class="link-accent">RapidAPI yt-api</a>
+        Add your Jellyfin server URL and API key to enable in-app search and playback from your personal library.
       </p>
 
       <div class="field field--api">
+        <input type="url" id="jellyfinServerInput" autocomplete="off" class="field__input field__input--with-clear"
+          placeholder="https://your-jellyfin-server.example.com" />
+        <button class="field-clear field-clear--absolute" id="clearJellyfinServerBtn" title="Clear Jellyfin Server URL"
+          type="button">
+          ✕
+        </button>
+      </div>
+
+      <div class="field field--api">
         <input type="text" id="apiKeyInput" autocomplete="off" class="field__input field__input--with-clear"
-          placeholder="Paste your API Key here from RapidAPI yt-api" />
+          placeholder="Paste your Jellyfin API key" />
         <button class="field-clear field-clear--absolute" id="clearApiKeyBtn" title="Clear API Key" type="button">
           ✕
         </button>
       </div>
 
-      <button class="btn btn--primary btn--block" id="btnSaveSettings" type="button">Save API Key</button>
-
-      <div class="quota" id="apiQuotaContainer">
-        <div class="quota__header">
-          <div class="quota__title">API Usage (Monthly) <span class="quota__text" id="apiQuotaText">0 / --</span></div>
-        </div>
-        <div class="quota__bar">
-          <div class="quota__fill" id="apiQuotaFill"></div>
+      <div class="field field--api">
+        <label for="jellyfinVideoCodec"
+          style="color: var(--color-ink); font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem; display: block;">Video
+          Codec</label>
+        <div class="custom-select" id="jellyfinVideoCodecWrapper" tabindex="0">
+          <div class="custom-select__trigger" id="jellyfinVideoCodecTrigger" title="Video Codec">
+            <span class="custom-select__value" id="jellyfinVideoCodecValue">H.264 (Default/Safest)</span>
+            <span class="icon icon--sm icon-mask icon-mask--chevron-down" aria-hidden="true"></span>
+          </div>
+          <div class="custom-select__options" id="jellyfinVideoCodecOptions">
+            <div class="custom-select__option is-selected" data-value="h264">H.264 (Default/Safest)</div>
+            <div class="custom-select__option" data-value="h265">H.265 (HEVC)</div>
+            <div class="custom-select__option" data-value="av1">AV1</div>
+          </div>
         </div>
       </div>
+
+      <button class="btn btn--primary btn--block" id="btnSaveSettings" type="button" style="margin-top: 1.5rem;">Save
+        Jellyfin Settings</button>
 
       <div class="steps">
         <div class="step">
           <div class="step__badge">1</div>
           <div class="step__content">
-            <h3 class="step__title">Get API Key</h3>
+            <h3 class="step__title">Scan QR below and send Jellyfin settings from phone</h3>
             <p class="step__desc">
-              Scan QR code to open RapidAPI on your phone, sign in, and
-              generate a free API Key.
-            </p>
-            <div class="qr-panel" id="rapidApiQrcode"></div>
-          </div>
-        </div>
-
-        <div class="step">
-          <div class="step__badge">2</div>
-          <div class="step__content">
-            <h3 class="step__title">Scan QR below and paste key on your mobile</h3>
-            <p class="step__desc">
-              Paste API key into the field and tap
+              Paste server URL and API key on your mobile, then tap
               <b>Send to Car</b>.
             </p>
-            <div class="qr-panel" id="settingsMobileQrcode"></div>
-          </div>
-        </div>
 
-        <div class="step">
-          <div class="step__badge">3</div>
-          <div class="step__content">
-            <h3 class="step__title">Send to Car</h3>
-            <p class="step__desc step__desc--spaced">
-              Click button to share link to your vehicle, that will automatically import the API Key.
-            </p>
-            <button id="btnShareFlowSettings" class="btn btn--primary btn--share btn--block" type="button">
-              <span class="icon icon--sm icon-mask icon-mask--share" aria-hidden="true"></span>
-              Send API Key to Car
-            </button>
+
+            <div class="qr-panel" id="settingsMobileQrcode"></div>
           </div>
         </div>
       </div>
       <div class="modal__footer">
         <span>Made with &lt;3 from Poland by kamilmlody5</span>
-        <a href="https://github.com/KamilDzierbicki/carplayer" target="_blank" rel="noopener noreferrer" class="link-github"
-          title="View Source on GitHub">
+        <a href="https://github.com/KamilDzierbicki/carplayer" target="_blank" rel="noopener noreferrer"
+          class="link-github" title="View Source on GitHub">
           <span class="icon icon--lg icon-mask icon-mask--github" aria-hidden="true"></span>
         </a>
       </div>
@@ -137,12 +141,17 @@
   <div class="modal" id="mobileApiModal">
     <div class="modal__content">
       <button class="modal__close" data-close-modal="mobileApiModal" type="button"
-        aria-label="Close send API Key to Car modal">
+        aria-label="Close send Jellyfin settings to car modal">
         <span class="icon icon--md icon-mask icon-mask--close" aria-hidden="true"></span>
       </button>
-      <h2 class="modal__title">Send API Key to Car</h2>
+      <h2 class="modal__title">Send Jellyfin Settings to Car</h2>
       <div class="field">
-        <input type="text" id="mobileApiInput" placeholder="Paste API Key here" class="field__input" />
+        <input type="url" id="mobileJellyfinServerInput" placeholder="Paste Jellyfin server URL here"
+          class="field__input" />
+      </div>
+      <div class="field">
+        <input type="text" id="mobileJellyfinApiKeyInput" placeholder="Paste Jellyfin API key here"
+          class="field__input" />
       </div>
       <button class="btn btn--primary btn--share btn--block" id="btnShareApiFlow" type="button">
         <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
@@ -161,7 +170,7 @@
       <div class="qr-flow">
         <div class="qr-card" id="qrcode"></div>
         <div class="step-list">
-          <div class="step-list__title">How to play via phone:</div>
+          <div class="step-list__title">How to send link via phone:</div>
 
           <div class="step">
             <div class="step__badge">1</div>
@@ -170,7 +179,7 @@
 
           <div class="step">
             <div class="step__badge">2</div>
-            <p class="step__desc">Open the page and paste your video link.</p>
+            <p class="step__desc">Paste your video link on your phone.</p>
           </div>
 
           <div class="step">
@@ -181,7 +190,8 @@
       </div>
 
       <div class="field field--url">
-        <input type="url" id="videoUrl" placeholder="Type Direct video URL (.mp4, direct YouTube URL)" value=""
+        <input type="url" id="videoUrl"
+          placeholder="Video URL with valid CORS origin (.mp4 / Jellyfin or Plex stream link)" value=""
           class="field__input field__input--with-clear" />
         <button class="field-clear field-clear--center" id="clearVideoUrlBtn" title="Clear URL" type="button">
           ✕
@@ -203,7 +213,7 @@
       </button>
       <h2 class="modal__title">Send to Car</h2>
       <p class="section-note section-note--center">
-        Paste a direct link to an MP4 file or a link from YouTube
+        Paste a direct stream URL (`.mp4`, Jellyfin direct stream, etc.)
       </p>
       <div class="field">
         <input type="url" id="shareVideoUrl" placeholder="Paste Direct Video URL here" class="field__input" />
@@ -215,11 +225,144 @@
     </div>
   </div>
 
+  <div class="modal" id="linkRelayModal">
+    <div class="modal__content">
+      <button class="modal__close" data-close-modal="linkRelayModal" type="button"
+        aria-label="Close send any link modal">
+        <span class="icon icon--md icon-mask icon-mask--close" aria-hidden="true"></span>
+      </button>
+      <h2 class="modal__title">Send Link to Car</h2>
+      <p class="section-note section-note--center">
+        Scan this QR code with your phone and send any URL. Car browser will redirect to that link immediately.
+      </p>
+
+      <div class="qr-flow">
+        <div class="qr-card" id="linkRelayQrcode"></div>
+        <div class="step-list">
+          <div class="step">
+            <div class="step__badge">1</div>
+            <p class="step__desc">Scan this QR code with your phone.</p>
+          </div>
+
+          <div class="step">
+            <div class="step__badge">2</div>
+            <p class="step__desc">Paste any long URL you want in the mobile popup.</p>
+          </div>
+
+          <div class="step">
+            <div class="step__badge">3</div>
+            <p class="step__desc">Tap "Redirect to that link".</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="captionsModal">
+    <div class="modal__content">
+      <button class="modal__close" data-close-modal="captionsModal" type="button" aria-label="Close add captions modal">
+        <span class="icon icon--md icon-mask icon-mask--close" aria-hidden="true"></span>
+      </button>
+      <h2 class="modal__title">Add Captions</h2>
+      <p class="section-note section-note--center">
+        Paste direct subtitle link (`.srt` / `.vtt`) for the currently playing video.
+      </p>
+      <div class="field">
+        <input type="url" id="captionUrlInput" placeholder="https://example.com/subtitles/movie.srt"
+          class="field__input" />
+      </div>
+      <button class="btn btn--primary btn--block" id="btnLoadCaptionUrl" type="button">
+        Load Captions
+      </button>
+
+      <div class="qr-flow">
+        <div class="qr-card" id="captionsRelayQrcode"></div>
+        <div class="step-list">
+          <div class="step-list__title">Or send from phone:</div>
+
+          <div class="step">
+            <div class="step__badge">1</div>
+            <p class="step__desc">Scan this QR code with your phone.</p>
+          </div>
+
+          <div class="step">
+            <div class="step__badge">2</div>
+            <p class="step__desc">Paste subtitle link on your phone.</p>
+          </div>
+
+          <div class="step">
+            <div class="step__badge">3</div>
+            <p class="step__desc">Tap "Send to Car".</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="mobileCaptionModal">
+    <div class="modal__content">
+      <button class="modal__close" data-close-modal="mobileCaptionModal" type="button"
+        aria-label="Close mobile caption modal">
+        <span class="icon icon--md icon-mask icon-mask--close" aria-hidden="true"></span>
+      </button>
+      <h2 class="modal__title">Send Captions to Car</h2>
+      <p class="section-note section-note--center">
+        Paste direct subtitle link (`.srt` / `.vtt`) and send it to the active car session.
+      </p>
+      <div class="field">
+        <input type="url" id="mobileCaptionUrlInput" placeholder="https://example.com/subtitles/movie.vtt"
+          class="field__input" />
+      </div>
+      <button class="btn btn--primary btn--share btn--block" id="btnShareCaptionFlow" type="button">
+        <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
+        Send to Car
+      </button>
+    </div>
+  </div>
+
+  <div class="modal" id="mobileLinkRelayModal">
+    <div class="modal__content">
+      <button class="modal__close" data-close-modal="mobileLinkRelayModal" type="button"
+        aria-label="Close mobile redirect link modal">
+        <span class="icon icon--md icon-mask icon-mask--close" aria-hidden="true"></span>
+      </button>
+      <h2 class="modal__title">Redirect to That Link</h2>
+      <p class="section-note section-note--center">
+        Paste any URL and send it directly to the car browser.
+      </p>
+      <div class="field">
+        <input type="url" id="mobileRedirectUrl" placeholder="https://example.com/very/long/link"
+          class="field__input" />
+      </div>
+      <button class="btn btn--primary btn--share btn--block" id="btnRedirectFlow" type="button">
+        <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
+        Redirect to that link
+      </button>
+    </div>
+  </div>
+
+  <div class="modal" id="historyShareLinkModal">
+    <div class="modal__content">
+      <button class="modal__close" data-close-modal="historyShareLinkModal" type="button"
+        aria-label="Close video link popup">
+        <span class="icon icon--md icon-mask icon-mask--close" aria-hidden="true"></span>
+      </button>
+      <h2 class="modal__title">Video Link</h2>
+      <div class="field">
+        <input type="url" id="historyShareLinkInput" class="field__input" readonly />
+      </div>
+      <button class="btn btn--secondary btn--block" id="btnCopyHistoryShareLink" type="button">
+        Copy link
+      </button>
+    </div>
+  </div>
+
   <div id="playerScreen">
     <div class="loader" id="loader"></div>
 
     <div id="mediaContainer">
       <canvas id="videoCanvas"></canvas>
+      <div id="captionOverlay" class="caption-overlay" aria-live="off"></div>
       <div id="skipIndicator" class="skip-indicator"></div>
     </div>
 
@@ -231,12 +374,28 @@
       <div id="videoTitleOverlay" class="player-title"></div>
     </div>
 
-    <video id="hiddenVideo" class="hidden" playsinline></video>
-
     <div class="player-controls" id="controls">
+      <button class="icon-btn icon-btn--control" id="skipBackBtn" type="button" title="Back 10s">
+        <svg viewBox="0 0 24 24" class="icon icon--md" style="fill: currentColor; width: 1.5rem; height: 1.5rem;">
+          <path
+            d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+          <text x="12" y="16.5" text-anchor="middle"
+            style="font-size:7.5px;font-weight:bold;fill:currentColor;font-family:sans-serif">10</text>
+        </svg>
+      </button>
+
       <button class="icon-btn icon-btn--control" id="playPauseBtn" type="button">
         <span id="iconPlay" class="icon icon--md icon-mask icon-mask--play" aria-hidden="true"></span>
         <span id="iconPause" class="icon icon--md icon-mask icon-mask--pause hidden" aria-hidden="true"></span>
+      </button>
+
+      <button class="icon-btn icon-btn--control" id="skipFwdBtn" type="button" title="Forward 10s">
+        <svg viewBox="0 0 24 24" class="icon icon--md" style="fill: currentColor; width: 1.5rem; height: 1.5rem;">
+          <path
+            d="M12.01 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
+          <text x="12" y="16.5" text-anchor="middle"
+            style="font-size:7.5px;font-weight:bold;fill:currentColor;font-family:sans-serif">10</text>
+        </svg>
       </button>
 
       <div class="player-time">
@@ -246,38 +405,77 @@
 
       <div class="progress" id="progressWrapper">
         <div class="progress-bar-bg">
+          <div class="progress-buffer-layer" id="progressBufferLayer" aria-hidden="true"></div>
           <div class="progress-bar-fill" id="progressFill"></div>
         </div>
       </div>
 
       <div class="player-stream-controls">
-        <select class="select select--quality hidden" id="qualitySelect" title="Video Quality"></select>
+        <div class="custom-select hidden" id="qualitySelectWrapper" tabindex="0">
+          <div class="custom-select__trigger" id="qualitySelectTrigger" title="Video Quality">
+            <span class="custom-select__value" id="qualitySelectValue">Quality</span>
+            <span class="icon icon--sm icon-mask icon-mask--chevron-down" aria-hidden="true"></span>
+          </div>
+          <div class="custom-select__options" id="qualitySelectOptions">
+            <div class="custom-select__option" data-value="360">360p - 1 Mbps</div>
+            <div class="custom-select__option" data-value="480">480p - 2.5 Mbps</div>
+            <div class="custom-select__option is-selected" data-value="720">720p - 5 Mbps</div>
+            <div class="custom-select__option" data-value="1080">1080p - 8 Mbps</div>
+            <div class="custom-select__option" data-value="direct">Direct</div>
+          </div>
+        </div>
 
-        <select class="select select--speed" id="speedSelect" title="Playback Speed">
-          <option value="0.5">0.5x</option>
-          <option value="0.6">0.6x</option>
-          <option value="0.7">0.7x</option>
-          <option value="0.8">0.8x</option>
-          <option value="0.9">0.9x</option>
-          <option value="1" selected>1.0x</option>
-          <option value="1.1">1.1x</option>
-          <option value="1.2">1.2x</option>
-          <option value="1.25">1.25x</option>
-          <option value="1.3">1.3x</option>
-          <option value="1.4">1.4x</option>
-          <option value="1.5">1.5x</option>
-          <option value="1.6">1.6x</option>
-          <option value="1.7">1.7x</option>
-          <option value="1.75">1.75x</option>
-          <option value="1.8">1.8x</option>
-          <option value="1.9">1.9x</option>
-          <option value="2.0">2.0x</option>
-          <option value="2.1">2.1x</option>
-          <option value="2.2">2.2x</option>
-          <option value="2.3">2.3x</option>
-          <option value="2.4">2.4x</option>
-          <option value="2.5">2.5x</option>
-        </select>
+        <div class="custom-select hidden" id="audioTrackSelectWrapper" tabindex="0">
+          <div class="custom-select__trigger" id="audioTrackSelectTrigger" title="Audio Track">
+            <span class="custom-select__value" id="audioTrackSelectValue">Audio</span>
+            <span class="icon icon--sm icon-mask icon-mask--chevron-down" aria-hidden="true"></span>
+          </div>
+          <div class="custom-select__options" id="audioTrackSelectOptions">
+            <!-- Options injected by JS -->
+          </div>
+        </div>
+
+        <div class="custom-select" id="captionSelectWrapper" tabindex="0">
+          <div class="custom-select__trigger" id="captionSelectTrigger" title="Captions">
+            <span class="custom-select__value" id="captionSelectValue">Captions Off</span>
+            <span class="icon icon--sm icon-mask icon-mask--chevron-down" aria-hidden="true"></span>
+          </div>
+          <div class="custom-select__options" id="captionSelectOptions">
+            <div class="custom-select__option is-selected" data-value="off">Captions Off</div>
+          </div>
+        </div>
+
+        <div class="custom-select" id="speedSelectWrapper" tabindex="0">
+          <div class="custom-select__trigger" id="speedSelectTrigger" title="Playback Speed">
+            <span class="custom-select__value" id="speedSelectValue">1.0x</span>
+            <span class="icon icon--sm icon-mask icon-mask--chevron-down" aria-hidden="true"></span>
+          </div>
+          <div class="custom-select__options" id="speedSelectOptions">
+            <div class="custom-select__option" data-value="0.5">0.5x</div>
+            <div class="custom-select__option" data-value="0.6">0.6x</div>
+            <div class="custom-select__option" data-value="0.7">0.7x</div>
+            <div class="custom-select__option" data-value="0.8">0.8x</div>
+            <div class="custom-select__option" data-value="0.9">0.9x</div>
+            <div class="custom-select__option is-selected" data-value="1">1.0x</div>
+            <div class="custom-select__option" data-value="1.1">1.1x</div>
+            <div class="custom-select__option" data-value="1.2">1.2x</div>
+            <div class="custom-select__option" data-value="1.25">1.25x</div>
+            <div class="custom-select__option" data-value="1.3">1.3x</div>
+            <div class="custom-select__option" data-value="1.4">1.4x</div>
+            <div class="custom-select__option" data-value="1.5">1.5x</div>
+            <div class="custom-select__option" data-value="1.6">1.6x</div>
+            <div class="custom-select__option" data-value="1.7">1.7x</div>
+            <div class="custom-select__option" data-value="1.75">1.75x</div>
+            <div class="custom-select__option" data-value="1.8">1.8x</div>
+            <div class="custom-select__option" data-value="1.9">1.9x</div>
+            <div class="custom-select__option" data-value="2.0">2.0x</div>
+            <div class="custom-select__option" data-value="2.1">2.1x</div>
+            <div class="custom-select__option" data-value="2.2">2.2x</div>
+            <div class="custom-select__option" data-value="2.3">2.3x</div>
+            <div class="custom-select__option" data-value="2.4">2.4x</div>
+            <div class="custom-select__option" data-value="2.5">2.5x</div>
+          </div>
+        </div>
       </div>
 
       <div class="player-tools">

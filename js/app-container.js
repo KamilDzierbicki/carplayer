@@ -1,7 +1,7 @@
 import CarPlayerCore from "./app-core.js";
 import StorageService from "./storage.js";
 import HistoryRenderer from "./history.js";
-import YouTubeService from "./youtube.js";
+import JellyfinService from "./jellyfin.js";
 import PlayerController from "./player.js";
 import SettingsController from "./settings.js";
 import ShareController from "./share.js";
@@ -11,7 +11,7 @@ export default class AppContainer {
   #app;
   #storage;
   #historyUI;
-  #youtubeService;
+  #jellyfinService;
   #playerController;
   #settingsController;
   #shareController;
@@ -22,7 +22,7 @@ export default class AppContainer {
     this.#storage = new StorageService(this.#app);
 
     this.#historyUI = new HistoryRenderer(this.#app, this.#storage);
-    this.#youtubeService = new YouTubeService(this.#app, this.#storage);
+    this.#jellyfinService = new JellyfinService(this.#app, this.#storage);
     this.#playerController = new PlayerController(this.#app, this.#storage);
     this.#settingsController = new SettingsController(this.#app, this.#storage);
     this.#shareController = new ShareController(this.#app, this.#storage);
@@ -34,7 +34,7 @@ export default class AppContainer {
       storage: this.#storage,
       historyUI: this.#historyUI,
       playerController: this.#playerController,
-      youtubeService: this.#youtubeService,
+      jellyfinService: this.#jellyfinService,
       settingsController: this.#settingsController,
     });
   }
@@ -46,11 +46,11 @@ export default class AppContainer {
   #wireDependencies() {
     this.#storage.setHistoryRenderer(this.#historyUI);
 
-    this.#youtubeService.setSettingsController(this.#settingsController);
-    this.#settingsController.setYoutubeService(this.#youtubeService);
+    this.#jellyfinService.setSettingsController(this.#settingsController);
+    this.#jellyfinService.setPlayerController(this.#playerController);
+    this.#settingsController.setJellyfinService(this.#jellyfinService);
 
     this.#playerController.setDependencies({
-      youtubeService: this.#youtubeService,
       historyRenderer: this.#historyUI,
     });
 
@@ -58,7 +58,7 @@ export default class AppContainer {
 
     this.#historyUI.setActions({
       playUrl: (url) => this.#playerController.loadVideo(url),
-      playYoutube: (videoId, title) => this.#youtubeService.load(videoId, title),
+      playJellyfin: (itemId, title, serverBaseUrl) => this.#jellyfinService.load(itemId, title, serverBaseUrl),
       shareUrl: (url) => this.#shareController.shareVideo(url),
       openUrlModal: () => this.#app.openUrlModal(),
     });

@@ -1,390 +1,1348 @@
+import { ALL_FORMATS, AudioBufferSink, CanvasSink, Input, UrlSource, ReadableStreamSource, MPEG_TS } from 'https://cdn.jsdelivr.net/npm/mediabunny@1.34.5/+esm';
+import { registerAc3Decoder } from 'https://cdn.jsdelivr.net/npm/@mediabunny/ac3@1.34.5/+esm';
+
+// Register AC3
+registerAc3Decoder();
+
+// Constants
+const HLS_BITRATES = { 360: 1000000, 480: 2500000, 720: 5000000, 1080: 8000000 };
+const HLS_CACHE_SIZE = 256 * 1024 * 1024;
+const SEGMENT_MAX_RETRIES = 5;
+const SEGMENT_RETRY_BASE_MS = 1500;
+
+// ── Utilities ──────────────────────────────────────────
+const getTrackId = (track) => {
+    const id = track?.id;
+    if (id === null || id === undefined) return '';
+    return String(id).trim();
+};
+
+const formatSeconds = (seconds) => {
+    const safe = Math.max(0, Number(seconds) || 0);
+    const hours = Math.floor(safe / 3600);
+    const minutes = Math.floor((safe % 3600) / 60);
+    const secs = Math.floor(safe % 60);
+    if (hours > 0) return `${hours}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+    return `${minutes}:${String(secs).padStart(2, '0')}`;
+};
+
+const canDecodeTrack = async (track) => {
+    if (!track || track.codec === null || track.codec === undefined) return false;
+    if (typeof track.canDecode !== 'function') return true;
+    try { return Boolean(await track.canDecode()); } catch { return false; }
+};
+
+const filterDecodable = async (tracks) => {
+    const result = [];
+    for (const t of tracks) { if (await canDecodeTrack(t)) result.push(t); }
+    return result;
+};
+
+const collectDeduped = (tracks) => {
+    const deduped = [];
+    const seen = new Set();
+    for (const t of tracks) {
+        if (!t) continue;
+        const id = getTrackId(t);
+        if (id && seen.has(id)) continue;
+        if (id) seen.add(id);
+        deduped.push(t);
+    }
+    return deduped;
+};
+
+const toHttpUrl = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    try { const u = new URL(raw); return ['http:', 'https:'].includes(u.protocol) ? u.href : ''; }
+    catch { return ''; }
+};
+
+class BaseSourceAdapter {
+    constructor() { this.quality = 'direct'; }
+    async init() { }
+    getMediaUrl() { throw new Error('Not implemented'); }
+    getSubtitleTracks() { return []; }
+    async createInput() { throw new Error('Not implemented'); }
+    async getDuration(input) { return await input.computeDuration(); }
+    isSeekable() { return true; }
+    setQuality(newQuality) { this.quality = newQuality; }
+}
+
+export class DirectMp4Adapter extends BaseSourceAdapter {
+    constructor(url) { super(); this.url = url; }
+    getMediaUrl() { return this.url; }
+    async createInput() {
+        return new Input({
+            source: new UrlSource(this.url),
+            formats: ALL_FORMATS,
+        });
+    }
+}
+
+export class JellyfinAdapter extends BaseSourceAdapter {
+    constructor(jf, itemId, storage, quality = '360') {
+        super(); this.jf = jf; this.itemId = itemId; this.storage = storage;
+        this.quality = quality;
+        this.startSeconds = 0;
+        this._usedDirectPlay = false;
+        this._lastPlaySessionId = null;
+        this._audioIndex = null;
+    }
+    setQuality(newQuality) {
+        this.quality = newQuality;
+        this._hlsSegments = null;
+        this._usedDirectPlay = false;
+    }
+    setAudioIndex(index) {
+        this._audioIndex = index;
+        this._hlsSegments = null;
+        this._usedDirectPlay = false;
+    }
+    async init() {
+        this.playbackInfo = await this.jf.getPlaybackInfo(this.itemId);
+        this.mediaSourceId = this.playbackInfo.mediaSourceId;
+    }
+    getMediaUrl() {
+        return this.jf.getDirectPlayUrl(this.itemId, { mediaSourceId: this.mediaSourceId });
+    }
+    async _stopPreviousSession() {
+        if (this._lastPlaySessionId) {
+            await this.jf.stopActiveEncodings(this._lastPlaySessionId);
+            this._lastPlaySessionId = null;
+        }
+    }
+    async createInput(startSeconds = 0) {
+        this.startSeconds = startSeconds;
+        return this.quality === 'direct'
+            ? this._createDirectInput(startSeconds)
+            : this._createHlsInput(startSeconds);
+    }
+    async _createDirectInput(startSeconds) {
+        await this._stopPreviousSession();
+        const pbInfo = await this.jf.getPlaybackInfo(this.itemId, { startSeconds, mediaSourceId: this.mediaSourceId });
+        this._usedDirectPlay = true;
+        this._hlsSegments = null;
+        return new Input({
+            source: new UrlSource(this.jf.getDirectPlayUrl(this.itemId, { mediaSourceId: pbInfo.mediaSourceId })),
+            formats: ALL_FORMATS,
+        });
+    }
+    async _createHlsInput(startSeconds) {
+        this._usedDirectPlay = false;
+        const height = parseInt(this.quality) || 1080;
+
+        // Reuse cached HLS session if available
+        if (this._hlsSegments?.length > 0 && startSeconds > 0) {
+            const segDuration = this._hlsSegDuration || 3;
+            const skipToIndex = Math.min(this._hlsSegments.length - 1, Math.max(0, Math.floor(startSeconds / segDuration)));
+            return this._buildHlsInput(skipToIndex);
+        }
+
+        // New HLS session
+        await this._stopPreviousSession();
+        const pbInfo = await this.jf.getPlaybackInfo(this.itemId, { startSeconds: 0, mediaSourceId: this.mediaSourceId });
+        this._lastPlaySessionId = pbInfo.playSessionId || null;
+
+        const config = this.storage.getJellyfinConfig();
+
+        let hlsMasterUrl = pbInfo.transcodingUrl
+            || this.jf.getHlsUrl(this.itemId, { mediaSourceId: pbInfo.mediaSourceId, startSeconds: 0, height, playSessionId: pbInfo.playSessionId, audioIndex: this._audioIndex, videoCodec: config.videoCodec });
+        if (hlsMasterUrl.startsWith('/')) hlsMasterUrl = this.jf.baseUrl + hlsMasterUrl;
+        if (!hlsMasterUrl.includes('ApiKey=')) hlsMasterUrl += (hlsMasterUrl.includes('?') ? '&' : '?') + `ApiKey=${this.jf.apiKey}`;
+
+        // Fetch master playlist and pick first variant
+        const masterRes = await this.jf.fetchRaw(hlsMasterUrl);
+        if (!masterRes.ok) throw new Error(`HLS Master Playlist failed: ${masterRes.status}`);
+        const masterText = await masterRes.text();
+        let playlistUrl = hlsMasterUrl;
+        for (const line of masterText.split('\n').map(l => l.trim())) {
+            if (line && !line.startsWith('#')) { playlistUrl = this._resolveUrl(line, hlsMasterUrl); break; }
+        }
+
+        // Fetch media playlist and cache segments
+        const mediaRes = await this.jf.fetchRaw(playlistUrl);
+        if (!mediaRes.ok) throw new Error(`HLS Media Playlist failed: ${mediaRes.status}`);
+        const mediaText = await mediaRes.text();
+        this._hlsSegments = [];
+        this._hlsSegDuration = 3;
+        for (const line of mediaText.split('\n').map(l => l.trim())) {
+            if (line.startsWith('#EXT-X-TARGETDURATION:')) this._hlsSegDuration = parseFloat(line.split(':')[1]) || 3;
+            else if (line && !line.startsWith('#')) this._hlsSegments.push(this._resolveUrl(line, playlistUrl));
+        }
+
+        const skipTo = startSeconds > 0 ? Math.min(this._hlsSegments.length - 1, Math.max(0, Math.floor(startSeconds / this._hlsSegDuration))) : 0;
+        return this._buildHlsInput(skipTo);
+    }
+    _resolveUrl(relative, baseRef) {
+        if (relative.startsWith('http')) return relative;
+        const basePath = baseRef.split('?')[0];
+        const base = basePath.substring(0, basePath.lastIndexOf('/') + 1);
+        if (relative.includes('?')) return base + relative;
+        const query = baseRef.includes('?') ? '?' + baseRef.split('?')[1] : '';
+        return base + relative + query;
+    }
+    _buildHlsInput(startSegmentIndex = 0) {
+        const segments = this._hlsSegments;
+        let segmentIndex = startSegmentIndex;
+
+        const stream = new ReadableStream({
+            pull: async (controller) => {
+                if (segmentIndex >= segments.length) { controller.close(); return; }
+                const segUrl = segments[segmentIndex++];
+                let res;
+                for (let attempt = 0; attempt < SEGMENT_MAX_RETRIES; attempt++) {
+                    res = await this.jf.fetchRaw(segUrl);
+                    if (res.ok) break;
+                    if ([400, 404, 500].includes(res.status)) {
+                        const waitMs = SEGMENT_RETRY_BASE_MS + attempt * SEGMENT_RETRY_BASE_MS;
+                        console.warn(`[HLS] Segment ${segmentIndex} not ready (${res.status}), retry ${attempt + 1}/${SEGMENT_MAX_RETRIES} in ${waitMs}ms`);
+                        await new Promise(r => setTimeout(r, waitMs));
+                    } else break;
+                }
+                if (!res.ok) { controller.error(new Error(`Segment fetch failed: ${res.status}`)); return; }
+                controller.enqueue(new Uint8Array(await res.arrayBuffer()));
+            }
+        });
+
+        return new Input({
+            source: new ReadableStreamSource(stream, {
+                maxCacheSize: HLS_CACHE_SIZE
+            }),
+            formats: [MPEG_TS],
+        });
+    }
+    async getDuration(input) {
+        if (this.playbackInfo && this.playbackInfo.runTimeTicks) {
+            return this.playbackInfo.runTimeTicks / 10000000;
+        }
+        return await input.computeDuration();
+    }
+    isSeekable() {
+        return this._usedDirectPlay;
+    }
+    getSubtitleTracks() {
+        if (!this.playbackInfo) return [];
+        return this.playbackInfo.streams.filter(s => s.type === 'Subtitle').map(track => ({
+            id: `jf-sub-${track.index}`,
+            name: track.title || track.language || `Subtitle ${track.index}`,
+            externalUrl: this.jf.getSubtitleUrl(this.itemId, this.mediaSourceId, track.index)
+        }));
+    }
+    getAudioStreamInfo() {
+        if (!this.playbackInfo) return [];
+        return this.playbackInfo.streams.filter(s => s.type === 'Audio').map(s => ({
+            index: s.index,
+            label: s.title || [s.language, s.codec].filter(Boolean).join(' / ') || `Audio ${s.index}`
+        }));
+    }
+}
+
+// ── SubtitleManager ────────────────────────────────────
+class SubtitleManager {
+    constructor(captionOverlay, subtitleSelectTrigger, subtitleSelectValue, subtitleSelectOptions) {
+        this._overlay = captionOverlay;
+        this._selectTrigger = subtitleSelectTrigger;
+        this._selectValue = subtitleSelectValue;
+        this._selectOptions = subtitleSelectOptions;
+
+        this._tracksById = new Map();
+        this._options = [{ id: 'off', label: 'Captions Off' }];
+        this._selectedId = 'off';
+        this._cues = [];
+        this._cueIdx = 0;
+        this._loadToken = 0;
+        this._getPlaybackTime = () => 0;
+
+        if (this._selectOptions) {
+            this._selectOptions.addEventListener('click', (e) => {
+                const option = e.target.closest('.custom-select__option');
+                if (!option) return;
+                const value = option.dataset.value;
+                if (value === 'custom') {
+                    const wrapper = this._selectTrigger?.closest('.custom-select');
+                    if (wrapper) wrapper.blur();
+                    const modal = document.getElementById('captionsModal');
+                    if (modal && typeof window.app?.openModal === 'function') {
+                        window.app.openModal('captionsModal');
+                    } else if (modal) {
+                        modal.classList.add('active');
+                    }
+                    return;
+                }
+                if (value) this.selectTrack(value);
+
+                // Close dropdown
+                const wrapper = this._selectTrigger?.closest('.custom-select');
+                if (wrapper) wrapper.blur();
+            });
+        }
+    }
+
+    setPlaybackTimeGetter(fn) { this._getPlaybackTime = fn; }
+
+    renderText(text) {
+        if (!this._overlay) return;
+        const safe = String(text || '').trim();
+        this._overlay.textContent = safe;
+        this._overlay.classList.toggle('is-visible', Boolean(safe));
+        if (safe) {
+            this._overlay.style.opacity = '1';
+        } else {
+            this._overlay.style.opacity = '0';
+        }
+    }
+
+    findCueIndexForTime(time) {
+        const cues = this._cues;
+        if (!cues.length) return 0;
+        if (time <= cues[0].start) return 0;
+        const idx = cues.findIndex(c => c.end >= time);
+        return idx >= 0 ? idx : cues.length - 1;
+    }
+
+    findActiveCue(time) {
+        if (!this._cues.length) return null;
+        let c = Math.max(0, Math.min(this._cueIdx, this._cues.length - 1));
+        while (c > 0 && time < this._cues[c].start) c--;
+        while (c < this._cues.length - 1 && time > this._cues[c].end) c++;
+        this._cueIdx = c;
+        const cue = this._cues[c];
+        if (cue && time >= cue.start - 0.04 && time <= cue.end + 0.04) return cue;
+        const next = this._cues[c + 1];
+        if (next && time >= next.start - 0.04 && time <= next.end + 0.04) { this._cueIdx = c + 1; return next; }
+        return null;
+    }
+
+    renderAtTime(time) {
+        if (this._selectedId === 'off') { this.renderText(''); return; }
+        this.renderText(this.findActiveCue(time)?.text || '');
+    }
+
+    resetState() { this._cues = []; this._cueIdx = 0; this.renderText(''); }
+
+    syncSelector() {
+        if (!this._selectOptions || !this._selectValue) return;
+
+        this._selectOptions.innerHTML = '';
+        this._options.forEach(opt => {
+            const div = document.createElement('div');
+            div.className = 'custom-select__option';
+            div.dataset.value = opt.id;
+            div.textContent = opt.label;
+            if (opt.id === this._selectedId) {
+                div.classList.add('is-selected');
+                this._selectValue.textContent = opt.label;
+            }
+            this._selectOptions.appendChild(div);
+        });
+
+        const customDiv = document.createElement('div');
+        customDiv.className = 'custom-select__option';
+        customDiv.dataset.value = 'custom';
+        customDiv.textContent = 'Add Custom Captions...';
+        this._selectOptions.appendChild(customDiv);
+
+        const validMatch = this._options.find(o => o.id === this._selectedId);
+        if (!validMatch) {
+            this._selectedId = 'off';
+            this._selectValue.textContent = 'Captions Off';
+            const offOpt = this._selectOptions.querySelector('[data-value="off"]');
+            if (offOpt) offOpt.classList.add('is-selected');
+        }
+    }
+
+    parseTimestamp(value) {
+        const raw = String(value || '').trim().replace(',', '.');
+        if (!raw) return null;
+        const parts = raw.split(':').map(p => Number(p.trim()));
+        if (parts.some(p => !Number.isFinite(p))) return null;
+        if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+        if (parts.length === 2) return parts[0] * 60 + parts[1];
+        return null;
+    }
+
+    parseText(rawText, sourceUrl) {
+        const text = String(rawText || '').replace(/\uFEFF/g, '').trim();
+        if (!text) return [];
+        const isVtt = text.toUpperCase().startsWith('WEBVTT') || String(sourceUrl || '').toLowerCase().includes('.vtt');
+        const lines = text.replace(/\r\n?/g, '\n').split('\n');
+        const cues = [];
+        let i = 0;
+        while (i < lines.length) {
+            let timeline = lines[i].trim();
+            const upper = timeline.toUpperCase();
+            if (!timeline || (isVtt && (upper.startsWith('WEBVTT') || upper.startsWith('NOTE')))) { i++; continue; }
+            if (!timeline.includes('-->')) {
+                timeline = (lines[i + 1] || '').trim();
+                if (!timeline.includes('-->')) { i++; continue; }
+                i++;
+            }
+            const match = timeline.match(/^(.+?)\s*-->\s*(.+?)(?:\s+.*)?$/);
+            if (!match) { i++; continue; }
+            const start = this.parseTimestamp(match[1]);
+            const end = this.parseTimestamp(match[2]);
+            if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) { i++; continue; }
+            const textLines = [];
+            let cursor = i + 1;
+            while (cursor < lines.length && lines[cursor].trim()) { textLines.push(lines[cursor]); cursor++; }
+            const cueText = textLines.join('\n').trim();
+            if (cueText) cues.push({ start, end, text: cueText });
+            i = cursor + 1;
+        }
+        return cues.sort((a, b) => a.start - b.start);
+    }
+
+    normalizeEmbeddedCue(cue) {
+        if (!cue) return null;
+        const start = Number(cue.startTime ?? cue.start);
+        const end = Number(cue.endTime ?? cue.end);
+        const text = String(cue.text ?? cue.payload ?? '').trim();
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start || !text) return null;
+        return { start, end, text };
+    }
+
+    async readTrackCueList(track) {
+        if (!track) return [];
+        if (Array.isArray(track.externalCueList)) return track.externalCueList;
+        if (track.externalUrl) {
+            try {
+                const res = await fetch(track.externalUrl);
+                if (res.ok) { const cues = this.parseText(await res.text(), track.externalUrl); track.externalCueList = cues; return cues; }
+            } catch (e) { console.error("Failed to fetch external subtitles", e); }
+        }
+        const raw = track.cues ?? await track.getCues?.();
+        const arr = Array.isArray(raw) ? raw : (raw && typeof raw[Symbol.iterator] === 'function' ? Array.from(raw) : []);
+        return arr.map(c => this.normalizeEmbeddedCue(c)).filter(Boolean).sort((a, b) => a.start - b.start);
+    }
+
+    async selectTrack(trackId) {
+        this._selectedId = String(trackId || 'off');
+        this.syncSelector();
+        if (this._selectedId === 'off') { this.resetState(); return; }
+        const track = this._tracksById.get(this._selectedId);
+        if (!track) { this._selectedId = 'off'; this.syncSelector(); this.resetState(); return; }
+        const token = ++this._loadToken;
+        const cues = await this.readTrackCueList(track);
+        if (token !== this._loadToken) return;
+        this._cues = cues;
+        this._cueIdx = this.findCueIndexForTime(this._getPlaybackTime());
+        this.renderAtTime(this._getPlaybackTime());
+    }
+
+    labelFromUrl(url, fallbackIndex = 0) {
+        const fallback = `External Caption ${fallbackIndex + 1}`;
+        try { return decodeURIComponent(new URL(url).pathname.split('/').filter(Boolean).pop() || '').trim() || fallback; }
+        catch { return fallback; }
+    }
+
+    async loadExternalFromUrl(subtitleUrl) {
+        subtitleUrl = toHttpUrl(subtitleUrl);
+        if (!subtitleUrl) return false;
+        let response;
+        try { response = await fetch(subtitleUrl); } catch { return false; }
+        if (!response.ok) return false;
+
+        const cues = this.parseText(await response.text(), subtitleUrl);
+        if (!cues.length) return false;
+
+        let trackId = '';
+        for (const [id, track] of this._tracksById.entries()) {
+            if (track?.externalUrl === subtitleUrl) { track.externalCueList = cues; trackId = id; break; }
+        }
+        if (!trackId) {
+            trackId = `ext-${Date.now()}`;
+            const label = this.labelFromUrl(subtitleUrl, this._options.length);
+            this._tracksById.set(trackId, { id: trackId, name: label, externalUrl: subtitleUrl, externalCueList: cues });
+            this._options.push({ id: trackId, label });
+            this.syncSelector();
+        }
+        await this.selectTrack(trackId);
+        return true;
+    }
+
+    async collectTracks(input) {
+        let tracks = [];
+        if (typeof input.getSubtitleTracks === 'function') { try { tracks = (await input.getSubtitleTracks()) || []; } catch { tracks = []; } }
+        if (!tracks.length && typeof input.getTextTracks === 'function') { try { tracks = (await input.getTextTracks()) || []; } catch { tracks = []; } }
+        return collectDeduped(tracks);
+    }
+
+    initTracks(inputTracks, adapterTracks) {
+        this._tracksById = new Map();
+        this._options = [{ id: 'off', label: 'Captions Off' }];
+        inputTracks.forEach((track, index) => {
+            const id = getTrackId(track) || `caption-${index + 1}`;
+            if (this._tracksById.has(id)) return;
+            const label = String(track?.name || '').trim() || `Caption ${this._options.length}`;
+            this._tracksById.set(id, track);
+            this._options.push({ id, label });
+        });
+        adapterTracks.forEach(sub => {
+            this._tracksById.set(sub.id, sub);
+            this._options.push({ id: sub.id, label: sub.name });
+        });
+        this._selectedId = 'off';
+        this.resetState();
+        this.syncSelector();
+    }
+
+    seekTo(time) {
+        this._cueIdx = this.findCueIndexForTime(time);
+        this.renderAtTime(time);
+    }
+}
+
+// ── AudioManager ───────────────────────────────────────
+class AudioManager {
+    constructor(audioTrackSelectTrigger, audioTrackSelectValue, audioTrackSelectOptions, volumeSlider, muteBtn, storage) {
+        this._selectTrigger = audioTrackSelectTrigger;
+        this._selectValue = audioTrackSelectValue;
+        this._selectOptions = audioTrackSelectOptions;
+        this._volumeSlider = volumeSlider;
+        this._muteBtn = muteBtn;
+        this.storage = storage;
+
+        this.context = null;
+        this.gainNode = null;
+        this.sink = null;
+        this.iterator = null;
+        this.tracks = [];
+        this.selectedIndex = 0;
+        this.volumeLevel = this.storage.getVolume();
+        this.isMuted = false;
+        this.queuedNodes = new Set();
+
+        if (this._selectOptions) {
+            this._selectOptions.addEventListener('click', (e) => {
+                const option = e.target.closest('.custom-select__option');
+                if (!option) return;
+                const value = parseInt(option.dataset.value, 10);
+                if (!isNaN(value)) {
+                    if (this.onTrackSelected) this.onTrackSelected(value);
+                }
+                const wrapper = this._selectTrigger?.closest('.custom-select');
+                if (wrapper) wrapper.blur();
+            });
+        }
+
+        if (this._muteBtn) {
+            this._muteBtn.addEventListener('click', () => {
+                this.isMuted = !this.isMuted;
+                this.updateVolumeState();
+            });
+        }
+
+        if (this._volumeSlider) {
+            this._volumeSlider.value = this.volumeLevel;
+            this._volumeSlider.addEventListener('input', (e) => {
+                this.isMuted = false;
+                this.volumeLevel = Number(e.target.value) || 0;
+                this.updateVolumeState();
+                this.storage.saveVolume(this.volumeLevel);
+            });
+        }
+    }
+
+    updateVolumeState() {
+        const vol = this.isMuted ? 0 : this.volumeLevel;
+        if (this._volumeSlider) this._volumeSlider.value = String(vol);
+        if (this.gainNode) this.gainNode.gain.value = vol * vol;
+
+        if (this._muteBtn) {
+            const isMuted = vol === 0;
+            this._muteBtn.innerHTML = isMuted
+                ? '<span class="icon icon--md icon-mask icon-mask--volume-mute" aria-hidden="true"></span>'
+                : '<span class="icon icon--md icon-mask icon-mask--volume" aria-hidden="true"></span>';
+        }
+    }
+
+    syncSelector() {
+        const wrapper = this._selectTrigger?.closest('.custom-select');
+
+        if (!this.tracks.length && !this._metaTracks?.length) {
+            if (this._selectOptions) this._selectOptions.innerHTML = '<div class="custom-select__option" data-value="-1">No audio</div>';
+            if (this._selectValue) this._selectValue.textContent = 'No audio';
+            if (wrapper) wrapper.classList.add('hidden');
+            return;
+        }
+
+        if (wrapper) wrapper.classList.remove('hidden');
+
+        if (this._metaTracks?.length) {
+            if (this._selectOptions) {
+                this._selectOptions.innerHTML = this._metaTracks.map(t =>
+                    `<div class="custom-select__option ${t.index === this._selectedMetaIndex ? 'is-selected' : ''}" data-value="${t.index}">${t.label}</div>`
+                ).join('');
+            }
+            if (this._selectValue) {
+                const sel = this._metaTracks.find(t => t.index === this._selectedMetaIndex) || this._metaTracks[0];
+                this._selectValue.textContent = sel ? sel.label : 'Audio';
+            }
+            return;
+        }
+
+        if (this._selectOptions) {
+            this._selectOptions.innerHTML = this.tracks.map((track, i) => {
+                let label = String(track?.name || '').trim();
+                if (!label || label === `Audio ${i + 1}`) {
+                    const lang = track?.language || '';
+                    const codec = track?.codec || '';
+                    const parts = [lang, codec].filter(Boolean).join(' / ');
+                    label = parts ? `Audio ${i + 1} (${parts})` : `Audio ${i + 1}`;
+                }
+                return `<div class="custom-select__option ${i === this.selectedIndex ? 'is-selected' : ''}" data-value="${i}">${label}</div>`;
+            }).join('');
+        }
+
+        if (this._selectValue) {
+            const selOpt = this._selectOptions?.querySelector('.is-selected');
+            if (selOpt) this._selectValue.textContent = selOpt.textContent;
+        }
+    }
+
+    setTrackByIndex(index, { restartPlayback = true, getPlaybackTime, playing, pause, play } = {}) {
+        const track = this.tracks[index];
+        if (!track) return;
+        let nextSink;
+        try { nextSink = new AudioBufferSink(track); } catch { this.syncSelector(); return; }
+        const currentTime = Math.max(0, getPlaybackTime?.() || 0);
+        const wasPlaying = playing;
+        if (wasPlaying && restartPlayback) pause?.();
+        this.sink = nextSink;
+        this.selectedIndex = index;
+        this.syncSelector();
+        if (restartPlayback && wasPlaying) play?.();
+    }
+
+    async collectTracks(input, primaryTrack) {
+        let tracks = [];
+        if (typeof input.getAudioTracks === 'function') { try { tracks = (await input.getAudioTracks()) || []; } catch { tracks = []; } }
+        if (!tracks.length && primaryTrack) tracks = [primaryTrack];
+        return collectDeduped(tracks);
+    }
+
+    async createContext(sampleRate) {
+        if (this.context) await this.context.close();
+        const AC = window.AudioContext || window.webkitAudioContext;
+        this.context = new AC({ sampleRate });
+        this.gainNode = this.context.createGain();
+        this.gainNode.connect(this.context.destination);
+        this.updateVolumeState();
+    }
+
+    stopAllNodes() {
+        for (const node of this.queuedNodes) node.stop();
+        this.queuedNodes.clear();
+    }
+
+    async stopIterator() {
+        await this.iterator?.return();
+        this.iterator = null;
+    }
+
+    setMetaTracks(metaTracks) {
+        this._metaTracks = metaTracks;
+        this._selectedMetaIndex = metaTracks?.[0]?.index ?? null;
+        this.syncSelector();
+    }
+    selectMetaIndex(index) {
+        this._selectedMetaIndex = index;
+        this.syncSelector();
+    }
+}
+
+// ── PlayerController ───────────────────────────────────
 export default class PlayerController {
-  #app;
-  #storage;
-  #dom;
-  #state;
-  #youtubeService = null;
-  #historyRenderer = null;
+    constructor(app, storage) {
+        this.app = app;
+        this.storage = storage;
 
-  constructor(app, storage) {
-    this.#app = app;
-    this.#storage = storage;
-    this.#dom = app.dom;
-    this.#state = app.state;
+        this.dom = app.dom;
+        this.canvas = this.dom.canvas;
+        this.ctx = this.dom.ctx || this.canvas.getContext('2d');
+        this.loader = this.dom.loader;
 
-    this.#bindEvents();
-  }
+        this.subs = new SubtitleManager(
+            this.dom.captionOverlay,
+            this.dom.captionSelectTrigger,
+            this.dom.captionSelectValue,
+            this.dom.captionSelectOptions
+        );
 
-  setDependencies({ youtubeService, historyRenderer }) {
-    if (youtubeService) this.#youtubeService = youtubeService;
-    if (historyRenderer) this.#historyRenderer = historyRenderer;
-  }
+        this.audio = new AudioManager(
+            this.dom.audioTrackSelectTrigger,
+            this.dom.audioTrackSelectValue,
+            this.dom.audioTrackSelectOptions,
+            this.dom.volumeSlider,
+            this.dom.muteBtn,
+            this.storage
+        );
 
-  loadVideo(url) {
-    if (!url) {
-      alert("Please enter a valid video URL.");
-      return;
+        this.playing = false;
+        this.playbackSpeed = this.storage.getSpeed() || 1;
+        this.fileLoaded = false;
+        this.totalDuration = 0;
+        this.playbackTimeAtStart = 0;
+        this.audioContextStartTime = 0;
+        this.videoSink = null;
+        this.videoFrameIterator = null;
+        this.nextFrame = null;
+        this.asyncId = 0;
+        this.internalTimestampOffset = 0;
+        this.draggingProgressBar = false;
+        this.bufferedFrom = 0;
+        this.bufferedUntil = 0;
+        this.hideControlsTimeout = null;
+
+        this.TARGET_BUFFER_SECONDS = 15;
+        this.AUTO_HIDE_DELAY_MS = 3000;
+
+        this.currentUrl = '';
+
+        this.subs.setPlaybackTimeGetter(() => this.getPlaybackTime());
+        this._bindEvents();
+        this.updatePlayPauseIcon();
+        this.audio.updateVolumeState();
+        requestAnimationFrame(() => this._render());
+
+        // Sync initial speed UI
+        this._updateSpeedUI(this.playbackSpeed);
     }
 
-    const {
-      setupScreen,
-      playerScreen,
-      loader,
-      video,
-      speedSelect,
-      volumeSlider,
-      videoTitleOverlay,
-      qualitySelect,
-    } = this.#dom;
-
-    this.#app.clearBufferVisuals();
-
-    const ytMatch = url.match(this.#app.youtubeRegex);
-    if (ytMatch && ytMatch[1]) {
-      this.#youtubeService?.load(ytMatch[1]);
-      return;
+    setDependencies(deps) {
+        this.historyRenderer = deps.historyRenderer;
     }
 
-    setupScreen.classList.add("hidden");
-    playerScreen.classList.add("active");
-    loader.classList.add("is-visible");
-
-    this.#state.currentVideoUrl = url;
-    this.#storage.addHistory(url);
-
-    video.playbackRate = this.#storage.getSpeed();
-    speedSelect.value = this.#storage.getSpeed();
-    video.volume = this.#storage.getVolume();
-    volumeSlider.value = this.#storage.getVolume();
-
-    if (videoTitleOverlay) {
-      videoTitleOverlay.textContent = this.#app.getVideoTitleFromUrl(url);
+    getPlaybackTime() {
+        if (this.playing && this.audio.context) {
+            return this.playbackTimeAtStart + (this.audio.context.currentTime - this.audioContextStartTime) * this.playbackSpeed;
+        }
+        return this.playbackTimeAtStart;
     }
 
-    qualitySelect.innerHTML = `<option value="${url}" selected>Direct Link</option>`;
-    qualitySelect.classList.remove("hidden");
-
-    video.src = url;
-    video.load();
-  }
-
-  #bindEvents() {
-    const {
-      playerScreen,
-      video,
-      playPauseBtn,
-      canvas,
-      progressWrapper,
-      volumeSlider,
-      muteBtn,
-      speedSelect,
-      qualitySelect,
-      btnBack,
-    } = this.#dom;
-
-    playerScreen.addEventListener("mousemove", () => this.#showControls());
-    playerScreen.addEventListener("touchstart", () => this.#showControls(), { passive: true });
-
-    video.addEventListener("loadedmetadata", () => this.#handleLoadedMetadata());
-    video.addEventListener("play", () => this.#handlePlay());
-    video.addEventListener("pause", () => this.#handlePause());
-    video.addEventListener("timeupdate", () => this.#handleTimeUpdate());
-    video.addEventListener("error", (event) => this.#handleError(event));
-    video.addEventListener("waiting", () => this.#handleWaiting());
-    video.addEventListener("playing", () => this.#handlePlaying());
-
-    playPauseBtn.addEventListener("click", () => this.#togglePlayPause());
-    canvas.addEventListener("click", (event) => this.#handleCanvasClick(event));
-    progressWrapper.addEventListener("click", (event) => this.#seekByProgressClick(event));
-
-    volumeSlider.addEventListener("input", (event) => this.#handleVolumeInput(event));
-    muteBtn.addEventListener("click", () => this.#toggleMute());
-    speedSelect.addEventListener("change", (event) => this.#handleSpeedChange(event));
-    qualitySelect.addEventListener("change", (event) => this.#handleQualityChange(event));
-
-    btnBack.addEventListener("click", () => this.#handleBack());
-  }
-
-  #showControls() {
-    const { controls, topBar, video } = this.#dom;
-
-    controls.classList.remove("idle");
-    topBar.classList.remove("idle");
-
-    clearTimeout(this.#state.controlTimeout);
-    this.#state.controlTimeout = setTimeout(() => {
-      if (!video.paused && !this.#state.isDragging) {
-        controls.classList.add("idle");
-        topBar.classList.add("idle");
-      }
-    }, 3000);
-  }
-
-  #renderLoop() {
-    const { video, ctx, canvas } = this.#dom;
-
-    if (!video.paused && !video.ended && ctx) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    updatePlayPauseIcon() {
+        if (this.playing) {
+            this.dom.playPauseBtn.classList.add("is-playing");
+            this.dom.iconPlay.classList.add("hidden");
+            this.dom.iconPause.classList.remove("hidden");
+            this.dom.skipIndicator?.classList.add("hidden");
+        } else {
+            this.dom.playPauseBtn.classList.remove("is-playing");
+            this.dom.iconPlay.classList.remove("hidden");
+            this.dom.iconPause.classList.add("hidden");
+        }
     }
 
-    if ("requestVideoFrameCallback" in video) {
-      video.requestVideoFrameCallback(() => this.#renderLoop());
-    } else {
-      this.#state.animationFrameId = requestAnimationFrame(() => this.#renderLoop());
-    }
-  }
-
-  #showSkipIndicator(seconds, side) {
-    const { skipIndicator } = this.#dom;
-    const backIcon =
-      '<span class="skip-svg icon icon-mask icon-mask--skip-back" aria-hidden="true"></span>';
-    const forwardIcon =
-      '<span class="skip-svg icon icon-mask icon-mask--skip-forward" aria-hidden="true"></span>';
-
-    if (side === "left") {
-      skipIndicator.innerHTML = `${backIcon} <span>${seconds}s</span>`;
-      skipIndicator.classList.add("skip-indicator--left");
-      skipIndicator.classList.remove("skip-indicator--right");
-    } else {
-      skipIndicator.innerHTML = `<span>${seconds}s</span> ${forwardIcon}`;
-      skipIndicator.classList.add("skip-indicator--right");
-      skipIndicator.classList.remove("skip-indicator--left");
+    clearHideTimer() {
+        if (this.hideControlsTimeout !== null) { clearTimeout(this.hideControlsTimeout); this.hideControlsTimeout = null; }
     }
 
-    skipIndicator.classList.remove("show");
-    void skipIndicator.offsetWidth;
-    skipIndicator.classList.add("show");
-
-    clearTimeout(this.#state.skipTimeout);
-    this.#state.skipTimeout = setTimeout(() => {
-      skipIndicator.classList.remove("show");
-    }, 600);
-  }
-
-  #renderBuffer() {
-    const { video } = this.#dom;
-    const duration = video.duration;
-    if (duration <= 0) return;
-
-    for (let i = 0; i < video.buffered.length; i += 1) {
-      const startX = (video.buffered.start(i) / duration) * 100;
-      const endX = (video.buffered.end(i) / duration) * 100;
-      const width = endX - startX;
-
-      let bufferEl = document.getElementById(`buffer-${i}`);
-      if (!bufferEl) {
-        bufferEl = document.createElement("div");
-        bufferEl.id = `buffer-${i}`;
-        bufferEl.className = "progress-buffer-segment";
-        const progressBarBg = document.querySelector(".progress-bar-bg");
-        if (progressBarBg) progressBarBg.appendChild(bufferEl);
-      }
-
-      bufferEl.style.left = `${startX}%`;
-      bufferEl.style.width = `${width}%`;
-    }
-  }
-
-  #togglePlayPause() {
-    const { video } = this.#dom;
-    if (video.paused) video.play();
-    else video.pause();
-  }
-
-  #handleCanvasClick(event) {
-    const { canvas, video } = this.#dom;
-
-    if (this.#state.clickTimeout) {
-      clearTimeout(this.#state.clickTimeout);
-      this.#state.clickTimeout = null;
-
-      const rect = canvas.getBoundingClientRect();
-      const clickX = event.clientX - rect.left;
-
-      if (clickX < rect.width / 2) {
-        video.currentTime = Math.max(0, video.currentTime - 10);
-        this.#showSkipIndicator(10, "left");
-      } else {
-        video.currentTime = Math.min(video.duration, video.currentTime + 10);
-        this.#showSkipIndicator(10, "right");
-      }
-      return;
+    scheduleAutoHide() {
+        this.clearHideTimer();
+        if (!this.playing || this.draggingProgressBar) return;
+        this.hideControlsTimeout = setTimeout(() => {
+            if (this.playing && !this.draggingProgressBar) {
+                this.dom.controls?.classList.add('idle');
+                this.dom.topBar?.classList.add('idle');
+                this.dom.playerScreen.style.cursor = 'none';
+                this.dom.qualitySelectWrapper?.blur();
+            }
+        }, this.AUTO_HIDE_DELAY_MS);
     }
 
-    this.#state.clickTimeout = setTimeout(() => {
-      this.#togglePlayPause();
-      this.#state.clickTimeout = null;
-    }, 250);
-  }
-
-  #handleLoadedMetadata() {
-    const { loader, durationEl, video, canvas } = this.#dom;
-
-    loader.classList.remove("is-visible");
-    durationEl.textContent = this.#app.formatTime(video.duration);
-
-    const savedData = this.#storage.getPlaybackPos(this.#state.currentVideoUrl);
-    const savedTime = savedData ? savedData.time : 0;
-    if (savedTime > 0 && savedTime < video.duration) {
-      video.currentTime = savedTime;
+    showControls() {
+        this.dom.controls?.classList.remove('idle');
+        this.dom.topBar?.classList.remove('idle');
+        this.dom.playerScreen.style.cursor = 'default';
+        this.scheduleAutoHide();
     }
 
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    video.play().catch((error) => {
-      console.warn("Auto-play requires user interaction in this browser.", error);
-    });
-  }
-
-  #handlePlay() {
-    const { iconPlay, iconPause, video } = this.#dom;
-
-    iconPlay.classList.add("hidden");
-    iconPause.classList.remove("hidden");
-    this.#showControls();
-
-    if ("requestVideoFrameCallback" in video) {
-      video.requestVideoFrameCallback(() => this.#renderLoop());
-    } else {
-      this.#renderLoop();
-    }
-  }
-
-  #handlePause() {
-    const { iconPlay, iconPause } = this.#dom;
-    iconPlay.classList.remove("hidden");
-    iconPause.classList.add("hidden");
-    this.#showControls();
-  }
-
-  #handleTimeUpdate() {
-    const { video, currentTimeEl, progressFill } = this.#dom;
-
-    if (!this.#state.isDragging) {
-      currentTimeEl.textContent = this.#app.formatTime(video.currentTime);
-      const percent = (video.currentTime / video.duration) * 100 || 0;
-      progressFill.style.width = `${percent}%`;
-      this.#renderBuffer();
+    updateProgressBarTime(seconds) {
+        if (!this.totalDuration) { this.dom.currentTimeEl.textContent = '00:00'; this.dom.progressFill.style.width = '0%'; return; }
+        const safe = Math.max(0, Math.min(seconds, this.totalDuration));
+        this.dom.currentTimeEl.textContent = formatSeconds(safe);
+        this.dom.progressFill.style.width = `${(safe / this.totalDuration) * 100}%`;
     }
 
-    if (Math.floor(video.currentTime) % 5 === 0 && !video.paused) {
-      this.#storage.savePlaybackPos(this.#state.currentVideoUrl, video.currentTime, video.duration);
-    }
-  }
+    updateBufferedBar() {
+        if (!this.dom.progressBufferLayer) return;
 
-  #seekByProgressClick(event) {
-    const { progressWrapper, video, progressFill } = this.#dom;
-    const rect = progressWrapper.getBoundingClientRect();
-    const posX = event.clientX - rect.left;
-    const percentage = Math.max(0, Math.min(1, posX / rect.width));
+        // Use the existing DOM logic but we recreate segments since it's simpler
+        this.dom.progressBufferLayer.innerHTML = '';
+        if (!this.totalDuration || this.bufferedUntil <= this.bufferedFrom) return;
 
-    video.currentTime = percentage * video.duration;
-    progressFill.style.width = `${percentage * 100}%`;
-  }
+        const f = Math.max(0, Math.min(this.bufferedFrom, this.totalDuration));
+        const u = Math.max(f, Math.min(this.bufferedUntil, this.totalDuration));
 
-  #handleVolumeInput(event) {
-    const { video } = this.#dom;
-    const value = parseFloat(event.target.value);
+        const seg = document.createElement("div");
+        seg.className = "progress-buffer-segment";
+        seg.style.left = `${(f / this.totalDuration) * 100}%`;
+        seg.style.width = `${((u - f) / this.totalDuration) * 100}%`;
 
-    video.volume = value;
-    video.muted = value === 0;
-    this.#storage.saveVolume(value);
-  }
-
-  #toggleMute() {
-    const { video, volumeSlider } = this.#dom;
-
-    video.muted = !video.muted;
-    if (video.muted) {
-      volumeSlider.value = 0;
-      return;
+        this.dom.progressBufferLayer.appendChild(seg);
     }
 
-    video.volume = this.#storage.getVolume() || 1;
-    volumeSlider.value = video.volume;
-  }
+    resetBufferedBar(time = 0) { this.bufferedFrom = Math.max(0, Number(time) || 0); this.bufferedUntil = this.bufferedFrom; this.updateBufferedBar(); }
+    extendBufferedUntil(time) { if (time > this.bufferedUntil) { this.bufferedUntil = time; this.updateBufferedBar(); } }
 
-  #handleSpeedChange(event) {
-    const { video } = this.#dom;
-    const value = parseFloat(event.target.value);
+    async startVideoIterator() {
+        if (!this.videoSink) return;
+        this.asyncId++;
+        await this.videoFrameIterator?.return();
+        const useSeq = this.adapter && !this.adapter.isSeekable();
+        const startAt = useSeq ? undefined : this.getPlaybackTime();
+        this.videoFrameIterator = this.videoSink.canvases(startAt);
+        const firstResult = await this.videoFrameIterator.next();
+        const first = firstResult.value ?? null;
+        if (first) {
+            if (useSeq) {
+                this.internalTimestampOffset = this.playbackTimeAtStart - first.timestamp;
+            } else {
+                this.internalTimestampOffset = 0;
+            }
+            this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+            this.ctx.drawImage(first.canvas, 0, 0);
+        }
+        this.nextFrame = (await this.videoFrameIterator.next()).value ?? null;
+    }
 
-    video.playbackRate = value;
-    this.#storage.saveSpeed(value);
-  }
+    async updateNextFrame() {
+        const localId = this.asyncId;
+        while (true) {
+            const candidate = (await this.videoFrameIterator?.next())?.value ?? null;
+            if (!candidate || localId !== this.asyncId) break;
+            if (candidate.timestamp <= this.getPlaybackTime()) {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.drawImage(candidate.canvas, 0, 0);
+                continue;
+            }
+            this.nextFrame = candidate;
+            break;
+        }
+    }
 
-  #handleQualityChange(event) {
-    const { video } = this.#dom;
-    const newUrl = event.target.value;
-    const currentTime = video.currentTime;
-    const isPaused = video.paused;
-    const prevPlaybackRate = video.playbackRate;
+    async _setupVideoSink(videoTrack) {
+        if (videoTrack) {
+            const alpha = typeof videoTrack.canBeTransparent === 'function' ? await videoTrack.canBeTransparent() : false;
+            this.videoSink = new CanvasSink(videoTrack, { poolSize: 2, fit: 'contain', alpha });
+            this.canvas.width = videoTrack.displayWidth;
+            this.canvas.height = videoTrack.displayHeight;
+        } else {
+            this.videoSink = null;
+        }
+    }
 
-    video.src = newUrl;
-    video.load();
+    async runAudioIterator() {
+        if (!this.audio.sink || !this.audio.iterator) return;
+        for await (const { buffer, timestamp } of this.audio.iterator) {
+            if (!this.playing) break;
+            const absTs = timestamp + this.internalTimestampOffset;
+            this.extendBufferedUntil(absTs + (buffer?.duration || 0));
+            const node = this.audio.context.createBufferSource();
+            node.buffer = buffer;
+            node.playbackRate.value = this.playbackSpeed;
+            node.connect(this.audio.gainNode);
+            const delta = absTs - this.playbackTimeAtStart;
+            const startAt = this.audioContextStartTime + (delta / this.playbackSpeed);
+            if (startAt >= this.audio.context.currentTime) {
+                node.start(startAt);
+            } else {
+                const elapsed = (this.audio.context.currentTime - this.audioContextStartTime) * this.playbackSpeed;
+                node.start(this.audio.context.currentTime, Math.max(0, elapsed - delta));
+            }
+            this.audio.queuedNodes.add(node);
+            node.onended = () => this.audio.queuedNodes.delete(node);
+            while (this.playing && (timestamp - this.getPlaybackTime()) > this.TARGET_BUFFER_SECONDS) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+        }
+    }
 
-    video.addEventListener("loadedmetadata", function onLoaded() {
-      video.removeEventListener("loadedmetadata", onLoaded);
-      video.currentTime = currentTime;
-      video.playbackRate = prevPlaybackRate;
+    async play() {
+        if (!this.fileLoaded || !this.audio.context) return;
+        if (this.audio.context.state === 'suspended') await this.audio.context.resume();
+        if (this.getPlaybackTime() >= this.totalDuration) { this.playbackTimeAtStart = 0; await this.startVideoIterator(); }
+        this.audioContextStartTime = this.audio.context.currentTime;
+        this.playing = true;
+        if (this.audio.sink) {
+            await this.audio.stopIterator();
+            this.resetBufferedBar(this.getPlaybackTime());
+            const startAt = (this.adapter && !this.adapter.isSeekable()) ? undefined : this.getPlaybackTime();
+            this.audio.iterator = this.audio.sink.buffers(startAt);
+            void this.runAudioIterator();
+        }
+        this.updatePlayPauseIcon();
+        this.scheduleAutoHide();
+    }
 
-      if (!isPaused) {
-        video.play().catch((error) => console.warn("Quality auto-play prevented", error));
-      }
-    });
-  }
+    pause() {
+        if (!this.playing) return;
+        this.playbackTimeAtStart = this.getPlaybackTime();
 
-  #handleError(event) {
-    const { loader, setupScreen, playerScreen } = this.#dom;
+        // Save history position when pausing
+        if (this.currentUrl) {
+            this.storage.savePlaybackPos(this.currentUrl, this.playbackTimeAtStart, this.totalDuration);
+            this.historyRenderer?.render();
+        }
 
-    loader.classList.remove("is-visible");
-    console.error("Video Error", event);
-    alert(
-      "An error occurred while loading the video. Ensure the URL is correct and allows external loading (CORS/Not Found).",
-    );
-    setupScreen.classList.remove("hidden");
-    playerScreen.classList.remove("active");
-  }
+        this.playing = false;
+        this.audio.iterator?.return();
+        this.audio.iterator = null;
+        this.audio.stopAllNodes();
+        this.updatePlayPauseIcon();
+        this.clearHideTimer();
+        this.showControls();
+    }
 
-  #handleWaiting() {
-    this.#dom.loader.classList.add("is-visible");
-  }
+    togglePlay() { if (this.playing) this.pause(); else void this.play(); }
 
-  #handlePlaying() {
-    this.#dom.loader.classList.remove("is-visible");
-  }
+    async seekToTime(seconds) {
+        if (!this.fileLoaded) return;
+        const target = Math.max(0, Math.min(Number(seconds) || 0, this.totalDuration || 0));
+        this.updateProgressBarTime(target);
+        const wasPlaying = this.playing;
+        if (wasPlaying) this.pause();
+        this.playbackTimeAtStart = target;
+        this.resetBufferedBar(target);
+        this.subs.seekTo(target);
 
-  #clearTransientUrlParams() {
-    const currentUrlObj = new URL(window.location.href);
-    let hasChanges = false;
-    const transientParams = ["share", "settings", "url", "apikey"];
+        if (this.adapter && !this.adapter.isSeekable()) {
+            this.loader.classList.add('is-visible');
+            this.asyncId++;
+            await this.videoFrameIterator?.return();
+            await this.audio.stopIterator();
+            this.videoFrameIterator = null;
+            this.nextFrame = null;
 
-    transientParams.forEach((param) => {
-      if (!currentUrlObj.searchParams.has(param)) return;
-      currentUrlObj.searchParams.delete(param);
-      hasChanges = true;
-    });
+            try {
+                const input = await this.adapter.createInput(target);
+                let videoTrack = await input.getPrimaryVideoTrack();
+                if (!(await canDecodeTrack(videoTrack))) videoTrack = null;
+                await this._setupVideoSink(videoTrack);
 
-    if (!hasChanges) return;
+                const primaryAudioTrack = await input.getPrimaryAudioTrack();
+                let audioTracks = await this.audio.collectTracks(input, primaryAudioTrack);
+                audioTracks = await filterDecodable(audioTracks);
+                let audioTrack = null;
+                const expectedId = getTrackId(this.audio.tracks[this.audio.selectedIndex]);
+                if (expectedId) audioTrack = audioTracks.find(t => getTrackId(t) === expectedId) || null;
+                if (!audioTrack) audioTrack = audioTracks[0] || null;
+                this.audio.tracks = audioTracks;
+                this.audio.selectedIndex = Math.max(0, this.audio.tracks.findIndex(t => t === audioTrack));
+                if (!this.audio.tracks.length) this.audio.selectedIndex = 0;
+                if (this.audio.tracks.length) {
+                    this.audio.setTrackByIndex(this.audio.selectedIndex, { restartPlayback: false });
+                }
+                this.loader.classList.remove('is-visible');
+            } catch (e) {
+                console.error("[Player] Seek failed:", e);
+                this.loader.classList.remove('is-visible');
+                this.updatePlayPauseIcon();
+                return;
+            }
+        }
 
-    window.history.replaceState(
-      {},
-      document.title,
-      `${currentUrlObj.pathname}${currentUrlObj.search}${currentUrlObj.hash}`,
-    );
-  }
+        await this.startVideoIterator();
+        if (wasPlaying && target < this.totalDuration) await this.play();
 
-  #handleBack() {
-    const { video, playerScreen, setupScreen } = this.#dom;
+        // Save history position when seeking
+        if (this.currentUrl) {
+            this.storage.savePlaybackPos(this.currentUrl, target, this.totalDuration);
+            this.historyRenderer?.render();
+        }
+    }
 
-    video.pause();
-    cancelAnimationFrame(this.#state.animationFrameId);
+    _updateSpeedUI(speed) {
+        if (this.dom.speedSelectValue) this.dom.speedSelectValue.textContent = `${speed}x`;
+        if (this.dom.speedSelectOptions) {
+            const opts = Array.from(this.dom.speedSelectOptions.children);
+            opts.forEach(o => o.classList.remove('is-selected'));
+            const match = opts.find(o => parseFloat(o.dataset.value) === speed);
+            if (match) match.classList.add('is-selected');
+        }
+    }
 
-    this.#storage.savePlaybackPos(this.#state.currentVideoUrl, video.currentTime, video.duration);
+    changeSpeed(newSpeed) {
+        const speed = Number(newSpeed);
+        if (!Number.isFinite(speed) || speed <= 0) return;
+        this._updateSpeedUI(speed);
+        this.storage.saveSpeed(speed);
 
-    playerScreen.classList.remove("active");
-    setupScreen.classList.remove("hidden");
-    this.#clearTransientUrlParams();
-    this.#historyRenderer?.render();
-  }
+        if (!this.playing) {
+            this.playbackSpeed = speed;
+            return;
+        }
+        const now = this.getPlaybackTime();
+        this.playbackTimeAtStart = now;
+        this.audioContextStartTime = this.audio.context.currentTime;
+        this.playbackSpeed = speed;
+        this.audio.stopAllNodes();
+        if (this.audio.sink) {
+            this.audio.iterator?.return();
+            this.resetBufferedBar(now);
+            this.audio.iterator = this.audio.sink.buffers(now);
+            void this.runAudioIterator();
+        }
+        this.subs.renderAtTime(now);
+    }
+
+    async initMediaPlayer(adapter, options = { url: '', title: '', startTime: 0 }) {
+        if (!adapter) return;
+        this.currentUrl = options.url || '';
+
+        if (this.dom.videoTitleOverlay) {
+            this.dom.videoTitleOverlay.textContent = options.title || '';
+        }
+
+        try {
+            if (this.playing) this.pause();
+
+            // Switch UI immediately
+            this.dom.setupScreen.classList.add('hidden');
+            this.dom.playerScreen.classList.add('active');
+            this.dom.videoTitleOverlay.style.opacity = '1';
+
+            this.loader.classList.add('is-visible');
+
+            await adapter.init();
+            this.adapter = adapter;
+            this.asyncId++;
+            await this.videoFrameIterator?.return();
+            await this.audio.stopIterator();
+            this.videoFrameIterator = null;
+            this.nextFrame = null;
+            if (this.audio.context) { await this.audio.context.close(); this.audio.context = null; }
+            this.fileLoaded = false;
+
+            this.showControls();
+
+            const input = await adapter.createInput(options.startTime || 0);
+            this.totalDuration = await adapter.getDuration(input);
+            this.playbackTimeAtStart = options.startTime || 0;
+            this.dom.currentTimeEl.textContent = formatSeconds(this.playbackTimeAtStart);
+            this.dom.durationEl.textContent = formatSeconds(this.totalDuration);
+            this.resetBufferedBar(0);
+
+            let videoTrack = await input.getPrimaryVideoTrack();
+            const primaryAudioTrack = await input.getPrimaryAudioTrack();
+            let audioTracks = await this.audio.collectTracks(input, primaryAudioTrack);
+            const subtitleTracks = await this.subs.collectTracks(input);
+
+            if (this.dom.qualitySelectWrapper) {
+                this.dom.qualitySelectWrapper.classList.toggle('hidden', typeof adapter.getAudioStreamInfo !== 'function');
+            }
+
+            if (!(await canDecodeTrack(videoTrack))) videoTrack = null;
+            audioTracks = await filterDecodable(audioTracks);
+            let audioTrack = null;
+            const primaryId = getTrackId(primaryAudioTrack);
+            if (primaryId) audioTrack = audioTracks.find(t => getTrackId(t) === primaryId) || null;
+            if (!audioTrack) audioTrack = audioTracks[0] || null;
+            if (!videoTrack && !audioTrack) throw new Error('No supported audio/video tracks found.');
+
+            await this.audio.createContext(audioTrack?.sampleRate);
+            await this._setupVideoSink(videoTrack);
+            this.canvas.style.display = videoTrack ? 'block' : 'none';
+
+            this.audio.tracks = audioTracks;
+            this.audio.selectedIndex = Math.max(0, this.audio.tracks.findIndex(t => t === audioTrack));
+            if (!this.audio.tracks.length) this.audio.selectedIndex = 0;
+            this.audio.sink = null;
+
+            // Use Jellyfin metadata for audio selector if available
+            const metaAudio = typeof adapter.getAudioStreamInfo === 'function' ? adapter.getAudioStreamInfo() : [];
+            if (metaAudio.length > 1) {
+                this.audio.setMetaTracks(metaAudio);
+            } else {
+                this.audio._metaTracks = null;
+                this.audio.syncSelector();
+            }
+            if (this.audio.tracks.length) {
+                this.audio.setTrackByIndex(this.audio.selectedIndex, { restartPlayback: false });
+            }
+
+            this.subs.initTracks(subtitleTracks, adapter.getSubtitleTracks());
+
+            // Try to load manual caption url if available
+            if (this.currentUrl) {
+                const historyManualCap = this.storage.getManualCaptionUrl(this.currentUrl);
+                if (historyManualCap) {
+                    await this.subs.loadExternalFromUrl(historyManualCap);
+                }
+            }
+
+            this.fileLoaded = true;
+            await this.startVideoIterator();
+
+            // Try to un-suspend and auto-play
+            try {
+                if (this.audio.context.state === 'suspended') {
+                    await this.audio.context.resume();
+                }
+                await this.play();
+            } catch {
+                this.updatePlayPauseIcon();
+            }
+            this.loader.classList.remove('is-visible');
+        } catch (error) {
+            console.error("Player initialization failed:", error);
+            this.fileLoaded = false;
+            this.loader.classList.remove('is-visible');
+            this.updatePlayPauseIcon();
+            this.exitPlayer();
+            alert(`Playback failed: ${error.message}`);
+        }
+    }
+
+    // Main entry point for playing a URL
+    async loadVideo(videoUrl) {
+        if (!videoUrl) return;
+        const normalizedUrl = toHttpUrl(videoUrl);
+        if (!normalizedUrl) return;
+
+        this.app.dom.urlInput.value = "";
+        this.app.closeModal("urlModal");
+
+        let title = this.app.getVideoTitleFromUrl(normalizedUrl);
+        this.storage.addHistory(normalizedUrl, title);
+        const { time } = this.storage.getPlaybackPos(normalizedUrl);
+
+        await this.initMediaPlayer(new DirectMp4Adapter(normalizedUrl), {
+            url: normalizedUrl,
+            title: title,
+            startTime: time || 0
+        });
+    }
+
+    // Main entry point for playing Jellyfin
+    async loadJellyfinItem(jf, itemId, title, sessionUrl, qualityStr) {
+        const { time } = this.storage.getPlaybackPos(sessionUrl);
+        await this.initMediaPlayer(new JellyfinAdapter(jf, itemId, this.storage, qualityStr), {
+            url: sessionUrl,
+            title: title || `Jellyfin Video`,
+            startTime: time || 0
+        });
+    }
+
+    async loadExternalCaptionUrl(captionUrl) {
+        if (!this.fileLoaded) {
+            alert('Load video first.');
+            return false;
+        }
+        const url = toHttpUrl(captionUrl);
+        if (!url) return false;
+
+        const success = await this.subs.loadExternalFromUrl(url);
+        if (success && this.currentUrl) {
+            this.storage.saveManualCaptionUrl(this.currentUrl, url);
+        } else if (!success) {
+            alert('Failed to load captions from this URL.');
+        }
+        return success;
+    }
+
+    _render() {
+        if (this.fileLoaded && this.dom.playerScreen.style.display !== 'none') {
+            const t = this.getPlaybackTime();
+            if (this.playing && t >= this.totalDuration) { this.pause(); this.playbackTimeAtStart = this.totalDuration; }
+            if (this.nextFrame && (this.nextFrame.timestamp + this.internalTimestampOffset) <= t) {
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                this.ctx.drawImage(this.nextFrame.canvas, 0, 0);
+                this.nextFrame = null;
+                void this.updateNextFrame();
+            }
+            if (!this.draggingProgressBar) this.updateProgressBarTime(t);
+            this.subs.renderAtTime(t);
+            if (this.playing && t > this.bufferedFrom) { this.bufferedFrom = t; this.updateBufferedBar(); }
+        }
+        requestAnimationFrame(() => this._render());
+    }
+
+    _bindEvents() {
+        if (this.dom.skipBackBtn) {
+            this.dom.skipBackBtn.addEventListener('click', () => {
+                this._triggerSkipIndicator('backward');
+                this.seekToTime(this.getPlaybackTime() - 10);
+            });
+        }
+        if (this.dom.skipFwdBtn) {
+            this.dom.skipFwdBtn.addEventListener('click', () => {
+                this._triggerSkipIndicator('forward');
+                this.seekToTime(this.getPlaybackTime() + 10);
+            });
+        }
+        this.dom.playPauseBtn.addEventListener('click', () => this.togglePlay());
+        this.dom.playerScreen.addEventListener('click', (e) => {
+            // Handle clicking the background to show skip indicators/playpause
+            if (!e.target.closest('.player-controls') && !e.target.closest('.player-topbar') && !e.target.closest('.modal')) {
+                const screenWidth = window.innerWidth;
+                const clickX = e.clientX;
+                const thirdOfScreen = screenWidth / 3;
+
+                if (clickX < thirdOfScreen) {
+                    this._triggerSkipIndicator('backward');
+                    this.seekToTime(this.getPlaybackTime() - 10);
+                } else if (clickX > screenWidth - thirdOfScreen) {
+                    this._triggerSkipIndicator('forward');
+                    this.seekToTime(this.getPlaybackTime() + 10);
+                } else {
+                    this.togglePlay();
+                }
+            }
+        });
+
+        this.dom.playerScreen.addEventListener('pointermove', () => this.showControls());
+        this.dom.playerScreen.addEventListener('pointerdown', () => this.showControls());
+        this.dom.playerScreen.addEventListener('mouseleave', () => {
+            this.clearHideTimer();
+            if (this.playing && !this.draggingProgressBar) {
+                this.dom.controls?.classList.add('idle');
+                this.dom.topBar?.classList.add('idle');
+                this.dom.playerScreen.style.cursor = 'none';
+            }
+        });
+
+        if (this.dom.speedSelectOptions) {
+            this.dom.speedSelectOptions.addEventListener('click', (e) => {
+                const option = e.target.closest('.custom-select__option');
+                if (option && option.dataset.value) {
+                    this.changeSpeed(option.dataset.value);
+                    const wrapper = this.dom.speedSelectTrigger?.closest('.custom-select');
+                    if (wrapper) wrapper.blur();
+                }
+            });
+        }
+
+        if (this.dom.qualitySelectOptions) {
+            const preferredQuality = this.storage.getPreferredQualityId() || '720';
+            Array.from(this.dom.qualitySelectOptions.children).forEach(o => {
+                if (o.dataset.value === preferredQuality) {
+                    o.classList.add('is-selected');
+                    if (this.dom.qualitySelectValue) this.dom.qualitySelectValue.textContent = o.textContent;
+                } else {
+                    o.classList.remove('is-selected');
+                }
+            });
+
+            this.dom.qualitySelectOptions.addEventListener('click', async (e) => {
+                const option = e.target.closest('.custom-select__option');
+                if (!option || !option.dataset.value) return;
+
+                const value = option.dataset.value;
+                this.dom.qualitySelectValue.textContent = option.textContent;
+
+                // Update selection visually
+                Array.from(this.dom.qualitySelectOptions.children).forEach(o => o.classList.remove('is-selected'));
+                option.classList.add('is-selected');
+
+                this.storage.savePreferredQualityId(value);
+
+                const wrapper = this.dom.qualitySelectTrigger?.closest('.custom-select');
+                if (wrapper) wrapper.blur();
+
+                if (this.adapter && typeof this.adapter.setQuality === 'function') {
+                    const currentTime = this.getPlaybackTime();
+                    this.adapter.setQuality(value);
+                    await this.seekToTime(currentTime);
+                }
+            });
+        }
+
+        this.dom.progressWrapper.addEventListener('pointerdown', (e) => this._startProgressDrag(e));
+
+        // Audio Track changes -> pass to AudioManager handler
+        this.audio.onTrackSelected = async (selectedValue) => {
+            // If adapter supports audio index switching (Jellyfin HLS), rebuild pipeline
+            if (this.adapter && typeof this.adapter.setAudioIndex === 'function' && this.audio._metaTracks?.length) {
+                const currentTime = this.getPlaybackTime();
+                this.audio.selectMetaIndex(selectedValue);
+                this.adapter.setAudioIndex(selectedValue);
+                await this.seekToTime(currentTime);
+                return;
+            }
+            this.audio.setTrackByIndex(selectedValue, {
+                restartPlayback: true,
+                getPlaybackTime: () => this.getPlaybackTime(),
+                playing: this.playing,
+                pause: () => this.pause(),
+                play: () => void this.play(),
+            });
+        };
+
+        // Back buttons
+        this.dom.btnBack?.addEventListener('click', () => {
+            this.exitPlayer();
+        });
+    }
+
+    _startProgressDrag(event) {
+        if (!this.totalDuration) return;
+        this.draggingProgressBar = true;
+        this.showControls();
+        this.dom.progressWrapper.setPointerCapture(event.pointerId);
+        const rect = this.dom.progressWrapper.querySelector('.progress-bar-bg').getBoundingClientRect();
+        const preview = (cx) => { const r = Math.max(0, Math.min((cx - rect.left) / rect.width, 1)); this.updateProgressBarTime(r * this.totalDuration); return r; };
+        preview(event.clientX);
+        const onMove = (e) => { if (this.draggingProgressBar) preview(e.clientX); };
+        const onUp = (e) => {
+            this.draggingProgressBar = false;
+            this.dom.progressWrapper.releasePointerCapture(event.pointerId);
+            const ratio = preview(e.clientX);
+            void this.seekToTime(ratio * this.totalDuration);
+            this.scheduleAutoHide();
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', onUp);
+    }
+
+    _triggerSkipIndicator(direction) {
+        if (!this.dom.skipIndicator) return;
+
+        clearTimeout(this.skipIndicatorTimeout);
+        this.dom.skipIndicator.classList.remove("is-visible", "backward", "forward");
+
+        // Small delay to allow CSS transition to reset if rapidly clicking
+        setTimeout(() => {
+            this.dom.skipIndicator.classList.add(direction);
+            this.dom.skipIndicator.innerHTML =
+                direction === "backward"
+                    ? `<span class="icon icon--lg icon-mask icon-mask--back-10" aria-hidden="true"></span>`
+                    : `<span class="icon icon--lg icon-mask icon-mask--fwd-10" aria-hidden="true"></span>`;
+            this.dom.skipIndicator.classList.add("is-visible");
+
+            this.skipIndicatorTimeout = setTimeout(() => {
+                this.dom.skipIndicator.classList.remove("is-visible");
+            }, 600);
+        }, 10);
+    }
+
+    exitPlayer() {
+        this.pause();
+        this.storage.savePlaybackPos(this.currentUrl, this.playbackTimeAtStart, this.totalDuration);
+
+        try {
+            const dataUrl = this.canvas.toDataURL('image/jpeg', 0.5);
+            this.storage.saveHistoryThumbnail(this.currentUrl, dataUrl);
+        } catch (e) {
+            console.warn('Could not save canvas thumbnail:', e);
+        }
+
+        this.historyRenderer?.render();
+        this.dom.setupScreen.classList.remove('hidden');
+        this.dom.playerScreen.classList.remove('active');
+
+        this.asyncId++;
+        this.videoFrameIterator?.return();
+        this.audio.stopIterator();
+        if (this.audio.context) { this.audio.context.close(); this.audio.context = null; }
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        this.fileLoaded = false;
+        this.totalDuration = 0;
+        this.playbackTimeAtStart = 0;
+
+        this.subs.resetState();
+    }
 }

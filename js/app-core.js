@@ -11,20 +11,37 @@ export default class CarPlayerCore {
       searchInput: document.getElementById("searchInput"),
       btnLoad: document.getElementById("btnLoad"),
       loader: document.getElementById("loader"),
-      video: document.getElementById("hiddenVideo"),
       canvas: document.getElementById("videoCanvas"),
       controls: document.getElementById("controls"),
       playPauseBtn: document.getElementById("playPauseBtn"),
       iconPlay: document.getElementById("iconPlay"),
       iconPause: document.getElementById("iconPause"),
+      skipBackBtn: document.getElementById("skipBackBtn"),
+      skipFwdBtn: document.getElementById("skipFwdBtn"),
       currentTimeEl: document.getElementById("currentTime"),
       durationEl: document.getElementById("duration"),
       progressWrapper: document.getElementById("progressWrapper"),
+      progressBufferLayer: document.getElementById("progressBufferLayer"),
       progressFill: document.getElementById("progressFill"),
       volumeSlider: document.getElementById("volumeSlider"),
       muteBtn: document.getElementById("muteBtn"),
-      speedSelect: document.getElementById("speedSelect"),
-      qualitySelect: document.getElementById("qualitySelect"),
+      speedSelectWrapper: document.getElementById("speedSelectWrapper"),
+      speedSelectTrigger: document.getElementById("speedSelectTrigger"),
+      speedSelectValue: document.getElementById("speedSelectValue"),
+      speedSelectOptions: document.getElementById("speedSelectOptions"),
+      qualitySelectWrapper: document.getElementById("qualitySelectWrapper"),
+      qualitySelectTrigger: document.getElementById("qualitySelectTrigger"),
+      qualitySelectValue: document.getElementById("qualitySelectValue"),
+      qualitySelectOptions: document.getElementById("qualitySelectOptions"),
+      audioTrackSelectWrapper: document.getElementById("audioTrackSelectWrapper"),
+      audioTrackSelectTrigger: document.getElementById("audioTrackSelectTrigger"),
+      audioTrackSelectValue: document.getElementById("audioTrackSelectValue"),
+      audioTrackSelectOptions: document.getElementById("audioTrackSelectOptions"),
+      captionSelectWrapper: document.getElementById("captionSelectWrapper"),
+      captionSelectTrigger: document.getElementById("captionSelectTrigger"),
+      captionSelectValue: document.getElementById("captionSelectValue"),
+      captionSelectOptions: document.getElementById("captionSelectOptions"),
+      captionOverlay: document.getElementById("captionOverlay"),
       historyItems: document.getElementById("historyItems"),
       topBar: document.getElementById("topBar"),
       btnBack: document.getElementById("btnBack"),
@@ -34,9 +51,9 @@ export default class CarPlayerCore {
 
     this.#dom.ctx = this.#dom.canvas
       ? this.#dom.canvas.getContext("2d", {
-          alpha: false,
-          desynchronized: true,
-        })
+        alpha: false,
+        desynchronized: true,
+      })
       : null;
 
     this.#state = {
@@ -95,7 +112,11 @@ export default class CarPlayerCore {
   }
 
   clearBufferVisuals() {
-    document.querySelectorAll('[id^="buffer-"]').forEach((el) => el.remove());
+    if (this.#dom.progressBufferLayer) {
+      this.#dom.progressBufferLayer.replaceChildren();
+      return;
+    }
+    document.querySelectorAll(".progress-buffer-segment").forEach((el) => el.remove());
   }
 
   getVideoTitleFromUrl(url) {
