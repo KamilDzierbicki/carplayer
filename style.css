@@ -1710,7 +1710,7 @@
   }
 
   .volume-slider {
-    inline-size: 2rem;
+    inline-size: clamp(2.6rem, 12vw, 3.4rem);
   }
 
   .select {
@@ -1827,12 +1827,9 @@
     }
 
     .player-controls.idle {
-      opacity: 1;
-      transform: none;
-      pointer-events: auto;
-      background: transparent;
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
+      opacity: 0;
+      transform: translateY(1.2rem);
+      pointer-events: none;
     }
 
   .player-controls.idle .progress,
@@ -1845,9 +1842,9 @@
     }
 
     .player-controls.idle #playPauseBtn {
-      opacity: 1;
-      visibility: visible;
-      pointer-events: auto;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
     }
   }
 
@@ -1944,7 +1941,7 @@
     }
 
     .volume-slider {
-      inline-size: 3.9rem;
+      inline-size: 4.4rem;
     }
 
     .select {
