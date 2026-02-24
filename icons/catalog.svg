@@ -1,0 +1,132 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <linearGradient id="card1Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4c1d95" />
+      <stop offset="100%" stop-color="#312e81" />
+    </linearGradient>
+    <linearGradient id="card2Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#be185d" />
+      <stop offset="100%" stop-color="#831843" />
+    </linearGradient>
+    <linearGradient id="card3Grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0ea5e9" />
+      <stop offset="100%" stop-color="#0369a1" />
+    </linearGradient>
+
+    <linearGradient id="thumb1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6d28d9" />
+      <stop offset="100%" stop-color="#1e1b4b" />
+    </linearGradient>
+    <linearGradient id="thumb2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f43f5e" />
+      <stop offset="100%" stop-color="#4c0519" />
+    </linearGradient>
+    <linearGradient id="thumb3" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#082f49" />
+    </linearGradient>
+
+    <linearGradient id="shineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0" />
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.25" />
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+    </linearGradient>
+
+    <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="-10" dy="25" stdDeviation="15" flood-color="#000000" flood-opacity="0.7" />
+    </filter>
+
+    <clipPath id="thumbClip">
+      <rect x="-110" y="-70" width="220" height="110" rx="8" />
+    </clipPath>
+  </defs>
+
+  <style>
+    /* Floating Animations */
+    .float-1 { animation: float 6s ease-in-out infinite; }
+    .float-2 { animation: float 6s ease-in-out infinite 1s; }
+    .float-3 { animation: float 6s ease-in-out infinite 2s; }
+
+    @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-20px); }
+    }
+
+    /* Play Button Pulse */
+    .pulse { animation: pulsing 2s ease-in-out infinite; transform-origin: 0px -15px; }
+    @keyframes pulsing {
+    0%, 100% { transform: scale(1); opacity: 0.8; }
+    50% { transform: scale(1.15); opacity: 1; filter: drop-shadow(0 0 8px rgba(255,255,255,0.6)); }
+    }
+
+    /* Progress Bar Loading */
+    .progress-bar { animation: loadBar 5s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+    @keyframes loadBar {
+    0% { width: 0px; }
+    80%, 100% { width: 200px; }
+    }
+
+    /* Thumbnail Shine Sweep */
+    .shine-sweep { animation: sweep 5s linear infinite; }
+    @keyframes sweep {
+    0%, 20% { transform: translateX(-150%); }
+    80%, 100% { transform: translateX(150%); }
+    }
+  </style>
+
+  <g transform="translate(250, 260)">
+
+    <g class="float-1">
+      <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, 0)">
+        <g transform="translate(-100, -100)">
+          <rect x="-120" y="-80" width="240" height="170" rx="16" fill="url(#card1Grad)" filter="url(#shadow)" stroke="rgba(255,255,255,0.15)" stroke-width="2" />
+          <rect x="-110" y="-70" width="220" height="110" rx="8" fill="url(#thumb1)" />
+          <circle cx="0" cy="-15" r="14" fill="#ffffff" fill-opacity="0.3" />
+          <polygon points="-3,-22 -3,-8 7,-15" fill="#ffffff" />
+          <rect x="-110" y="55" width="160" height="8" rx="4" fill="#ffffff" fill-opacity="0.8" />
+          <rect x="-110" y="70" width="100" height="6" rx="3" fill="#ffffff" fill-opacity="0.4" />
+        </g>
+      </g>
+    </g>
+
+    <g class="float-2">
+      <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, 0)">
+        <g transform="translate(-50, -50)">
+          <rect x="-120" y="-80" width="240" height="170" rx="16" fill="url(#card2Grad)" filter="url(#shadow)" stroke="rgba(255,255,255,0.2)" stroke-width="2" />
+          <rect x="-110" y="-70" width="220" height="110" rx="8" fill="url(#thumb2)" />
+          <circle cx="0" cy="-15" r="14" fill="#ffffff" fill-opacity="0.3" />
+          <polygon points="-3,-22 -3,-8 7,-15" fill="#ffffff" />
+          <rect x="-110" y="55" width="180" height="8" rx="4" fill="#ffffff" fill-opacity="0.9" />
+          <rect x="-110" y="70" width="120" height="6" rx="3" fill="#ffffff" fill-opacity="0.5" />
+        </g>
+      </g>
+    </g>
+
+    <g class="float-3">
+      <g transform="matrix(0.866, 0.5, -0.866, 0.5, 0, 0)">
+        <rect x="-120" y="-80" width="240" height="170" rx="16" fill="url(#card3Grad)" filter="url(#shadow)" stroke="rgba(255,255,255,0.3)" stroke-width="2" />
+
+        <g clip-path="url(#thumbClip)">
+          <rect x="-110" y="-70" width="220" height="110" rx="8" fill="url(#thumb3)" />
+          <rect x="-110" y="-70" width="150" height="150" fill="url(#shineGrad)" class="shine-sweep" transform="skewX(-20)" />
+        </g>
+
+        <rect x="-100" y="25" width="200" height="6" rx="3" fill="rgba(255,255,255,0.2)" />
+        <rect x="-100" y="25" height="6" rx="3" fill="#ffffff" class="progress-bar" />
+
+        <rect x="-110" y="55" width="150" height="8" rx="4" fill="#ffffff" fill-opacity="1" />
+        <rect x="-110" y="70" width="80" height="6" rx="3" fill="#ffffff" fill-opacity="0.6" />
+
+        <rect x="70" y="70" width="40" height="6" rx="3" fill="#ffffff" fill-opacity="0.4" />
+
+        <g class="pulse">
+          <circle cx="0" cy="-15" r="24" fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.5)" stroke-width="1.5"/>
+          <circle cx="0" cy="-15" r="18" fill="#ffffff" />
+          <polygon points="-4,-24 -4,-6 8,-15" fill="#0369a1" />
+        </g>
+
+      </g>
+    </g>
+
+  </g>
+</svg>

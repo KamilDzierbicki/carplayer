@@ -1,0 +1,16 @@
+# JetBrains IDEs (IntelliJ, WebStorm, etc.)
+.idea/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+.directory

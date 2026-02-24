@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e82127" />
+      <stop offset="100%" stop-color="#ff3338" />
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="496" height="496" rx="112" fill="url(#cardGrad)" stroke="rgba(255,255,255,0.3)" stroke-width="8" />
+
+  <g transform="translate(256, 256)">
+    <circle cx="0" cy="0" r="140" fill="#ffffff" />
+    <!-- Play Button Triangle -->
+    <polygon points="-40,-72 -40,72 84,0" fill="#ff3338" />
+  </g>
+</svg>
