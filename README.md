@@ -26,6 +26,7 @@ entertainment restrictions.
 - Resume videos from the last watched timestamp.
 - Save volume and playback speed between sessions.
 - Provide fullscreen playback with a dark, easy-to-read UI.
+- All data is stored locally in your browser (no backend required)
 
 ## Limitations
 
