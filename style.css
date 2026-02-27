@@ -1804,7 +1804,7 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: var(--space-3);
@@ -1822,9 +1822,9 @@
   }
 
   .search-bar {
-    flex: 1;
-    max-inline-size: 36rem;
-    margin-inline: var(--space-3);
+    order: 3;
+    flex: 1 1 100%;
+    margin-inline: 0;
     gap: var(--space-1);
     padding: 0.55rem 0.75rem;
     border-radius: 0.75rem;
@@ -2266,6 +2266,7 @@
     }
 
     .app-nav {
+      flex-wrap: nowrap;
       gap: var(--space-3);
       padding-block-start: calc(var(--space-4) + var(--safe-top));
       padding-block-end: var(--space-4);
@@ -2274,6 +2275,9 @@
     }
 
     .search-bar {
+      order: 0;
+      flex: 1;
+      max-inline-size: 36rem;
       margin-inline: auto;
     }
 
@@ -2458,7 +2462,7 @@
     .app-nav {
       position: relative;
       display: flex;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       align-items: center;
       gap: var(--space-2);
       min-block-size: auto;
@@ -2477,7 +2481,9 @@
     }
 
     .search-bar {
-      margin-inline: var(--space-2);
+      order: 3;
+      flex: 1 1 100%;
+      margin-inline: 0;
     }
 
     .history-header {
