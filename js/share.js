@@ -58,14 +58,14 @@ export default class ShareController {
       if (!modalId) return;
 
       if (modalId === "linkRelayModal") {
-        void this.#renderRelayQr({
+        void this.#resumeRelayPollingOrRender({
           containerId: "linkRelayQrcode",
           mode: "linkshare",
           width: 250,
           height: 250,
         });
       } else if (modalId === "urlModal") {
-        void this.#renderRelayQr({
+        void this.#resumeRelayPollingOrRender({
           containerId: "qrcode",
           mode: "share",
           width: 250,
@@ -73,7 +73,7 @@ export default class ShareController {
           flowContext: "carplayer-add-video-flow",
         });
       } else if (modalId === "settingsModal") {
-        void this.#renderRelayQr({
+        void this.#resumeRelayPollingOrRender({
           containerId: "settingsMobileQrcode",
           mode: "settings",
           width: 240,
@@ -81,13 +81,20 @@ export default class ShareController {
           flowContext: "carplayer-jellyfin-settings-form",
         });
       } else if (modalId === "captionsModal") {
-        void this.#renderRelayQr({
+        void this.#resumeRelayPollingOrRender({
           containerId: "captionsRelayQrcode",
           mode: "captionshare",
           width: 250,
           height: 250,
           flowContext: "carplayer-add-captions-flow",
         });
+      }
+    });
+
+    document.addEventListener("modal-close", (e) => {
+      const activeModalClass = document.querySelector(".modal.active");
+      if (!activeModalClass) {
+        this.#stopRelayPolling();
       }
     });
 
@@ -326,6 +333,13 @@ export default class ShareController {
 
   // #refreshRelayQrs() is removed, we do just-in-time rendering.
 
+  async #resumeRelayPollingOrRender(config) {
+    if (this.#isRelaySessionUsable(this.#relaySession) && !this.#relayPollTimer) {
+      this.#startRelayPolling();
+    }
+    return this.#renderRelayQr(config);
+  }
+
   async #renderRelayQr({ containerId, mode, width, height, flowContext }) {
     let qrContainer = null;
     if (flowContext) {
@@ -489,11 +503,15 @@ export default class ShareController {
     };
   }
 
-  #startRelayPolling() {
+  #stopRelayPolling() {
     if (this.#relayPollTimer) {
       clearTimeout(this.#relayPollTimer);
       this.#relayPollTimer = null;
     }
+  }
+
+  #startRelayPolling() {
+    this.#stopRelayPolling();
 
     const poll = async () => {
       if (!this.#relaySession) return;
