@@ -1,11 +1,14 @@
+const RELAY_API_BASE = "https://carplayer.oxyconit.com/api/relay";
+
 export default class ShareController {
   #app;
   #storage;
   #playerController = null;
 
-  #peer = null;
-  #peerId = "";
-  #peerReadyPromise = null;
+  #relaySession = null;
+  #relaySessionPromise = null;
+  #relayPollTimer = null;
+  #lastRelayFailureReason = "";
 
   #shareSuccessTimeout = null;
 
@@ -13,7 +16,9 @@ export default class ShareController {
     this.#app = app;
     this.#storage = storage;
 
-    window.addEventListener("DOMContentLoaded", () => this.#handleDomReady());
+    window.addEventListener("DOMContentLoaded", () => {
+      void this.#handleDomReady();
+    });
   }
 
   setPlayerController(playerController) {
@@ -23,8 +28,8 @@ export default class ShareController {
   async shareVideo(videoUrl) {
     if (!videoUrl) return;
 
-    const targetPeerId = this.#getTargetPeerId();
-    if (targetPeerId && this.#isShareMode()) {
+    const targetSession = this.#getTargetRelayCredentials();
+    if (targetSession && this.#isShareMode()) {
       await this.#sendPayloadToCar({
         type: "video-url",
         value: videoUrl,
@@ -35,24 +40,29 @@ export default class ShareController {
     this.#openHistoryShareLinkModal(videoUrl);
   }
 
-  #handleDomReady() {
+  async #handleDomReady() {
     this.#bindShareButtons();
     this.#handleInitialParams();
-    this.#ensurePeerReady();
+
+    if (!this.#isShareMode()) {
+      await this.#ensureRelaySessionReady();
+    }
+
     this.#refreshRelayQrs();
   }
 
   #bindShareButtons() {
-    const btnOpenLinkRelayModal = document.getElementById("btnOpenLinkRelayModal");
-    if (btnOpenLinkRelayModal) {
-      btnOpenLinkRelayModal.addEventListener("click", () => {
+    const appNav = document.querySelector("carplayer-navbar");
+    if (appNav) {
+      appNav.addEventListener("action-send-link", () => {
         this.#app.openModal("linkRelayModal");
         this.#refreshRelayQrs();
       });
     }
 
-    const btnLoadCaptionUrl = document.getElementById("btnLoadCaptionUrl");
-    const captionUrlInput = document.getElementById("captionUrlInput");
+    const captionsFlow = document.querySelector("carplayer-add-captions-flow");
+    const btnLoadCaptionUrl = captionsFlow ? captionsFlow.querySelector("#btnLoadCaptionUrl") : null;
+    const captionUrlInput = captionsFlow ? captionsFlow.querySelector("#captionUrlInput") : null;
     if (btnLoadCaptionUrl && captionUrlInput) {
       btnLoadCaptionUrl.addEventListener("click", async () => {
         const captionUrl = captionUrlInput.value.trim();
@@ -69,8 +79,9 @@ export default class ShareController {
       });
     }
 
-    const btnShareFlow = document.getElementById("btnShareFlow");
-    const shareVideoUrl = document.getElementById("shareVideoUrl");
+    const shareAppModal = document.getElementById("shareAppModal");
+    const btnShareFlow = shareAppModal ? shareAppModal.querySelector("#btnShareFlow") : document.getElementById("btnShareFlow");
+    const shareVideoUrl = shareAppModal ? shareAppModal.querySelector("#shareVideoUrl") : document.getElementById("shareVideoUrl");
 
     if (btnShareFlow && shareVideoUrl) {
       btnShareFlow.addEventListener("click", async () => {
@@ -130,10 +141,11 @@ export default class ShareController {
       });
     }
 
-    const btnShareCaptionFlow = document.getElementById("btnShareCaptionFlow");
+    const mobileCaptionModal = document.getElementById("mobileCaptionModal");
+    const btnShareCaptionFlow = mobileCaptionModal ? mobileCaptionModal.querySelector("#btnShareCaptionFlow") : document.getElementById("btnShareCaptionFlow");
     if (btnShareCaptionFlow) {
       btnShareCaptionFlow.addEventListener("click", async () => {
-        const mobileCaptionUrlInput = document.getElementById("mobileCaptionUrlInput");
+        const mobileCaptionUrlInput = mobileCaptionModal ? mobileCaptionModal.querySelector("#mobileCaptionUrlInput") : document.getElementById("mobileCaptionUrlInput");
         if (!mobileCaptionUrlInput) return;
 
         const captionUrl = mobileCaptionUrlInput.value.trim();
@@ -163,8 +175,8 @@ export default class ShareController {
     const btnShareFlowSettings = document.getElementById("btnShareFlowSettings");
     if (btnShareFlowSettings) {
       btnShareFlowSettings.addEventListener("click", async () => {
-        const serverInput = document.getElementById("jellyfinServerInput");
-        const apiKeyInput = document.getElementById("apiKeyInput");
+        const serverInput = document.getElementById("jellyfinServer");
+        const apiKeyInput = document.getElementById("apiKey");
         const serverUrl = serverInput?.value.trim() || this.#storage.getJellyfinServerUrl();
         const apiKey = apiKeyInput?.value.trim() || this.#storage.getJellyfinApiKey();
 
@@ -187,10 +199,11 @@ export default class ShareController {
       });
     }
 
-    const btnRedirectFlow = document.getElementById("btnRedirectFlow");
+    const mobileLinkRelayModal = document.getElementById("mobileLinkRelayModal");
+    const btnRedirectFlow = mobileLinkRelayModal ? mobileLinkRelayModal.querySelector("#btnRedirectFlow") : document.getElementById("btnRedirectFlow");
     if (btnRedirectFlow) {
       btnRedirectFlow.addEventListener("click", async () => {
-        const mobileRedirectUrl = document.getElementById("mobileRedirectUrl");
+        const mobileRedirectUrl = mobileLinkRelayModal ? mobileLinkRelayModal.querySelector("#mobileRedirectUrl") : document.getElementById("mobileRedirectUrl");
         if (!mobileRedirectUrl) return;
 
         const normalizedUrl = this.#normalizeUrl(mobileRedirectUrl.value);
@@ -286,13 +299,15 @@ export default class ShareController {
       mode: "share",
       width: 250,
       height: 250,
+      flowContext: "carplayer-add-video-flow",
     });
 
     this.#renderRelayQr({
       containerId: "settingsMobileQrcode",
       mode: "settings",
-      width: 130,
-      height: 130,
+      width: 240,
+      height: 240,
+      flowContext: "carplayer-jellyfin-settings-form",
     });
 
     this.#renderRelayQr({
@@ -300,6 +315,7 @@ export default class ShareController {
       mode: "linkshare",
       width: 250,
       height: 250,
+      flowContext: "carplayer-link-relay-flow",
     });
 
     this.#renderRelayQr({
@@ -307,11 +323,18 @@ export default class ShareController {
       mode: "captionshare",
       width: 250,
       height: 250,
+      flowContext: "carplayer-add-captions-flow",
     });
   }
 
-  #renderRelayQr({ containerId, mode, width, height }) {
-    const qrContainer = document.getElementById(containerId);
+  #renderRelayQr({ containerId, mode, width, height, flowContext }) {
+    let qrContainer = null;
+    if (flowContext) {
+      const flow = document.querySelector(flowContext);
+      if (flow) qrContainer = flow.querySelector(`#${containerId}`);
+    }
+    if (!qrContainer) qrContainer = document.getElementById(containerId);
+
     if (!qrContainer) return;
 
     const relayUrl = this.#buildRelayUrl(mode);
@@ -321,6 +344,9 @@ export default class ShareController {
     if (!relayUrl) {
       qrContainer.innerHTML =
         '<div class="loader loader-inline is-visible" aria-hidden="true"></div><div class="loader-text">Preparing secure relay...</div>';
+      if (!this.#isShareMode()) {
+        void this.#ensureRelaySessionReady();
+      }
       return;
     }
 
@@ -337,43 +363,45 @@ export default class ShareController {
   #buildRelayUrl(mode) {
     const currentUrlObj = new URL(window.location.href);
 
-    currentUrlObj.searchParams.delete("share");
-    currentUrlObj.searchParams.delete("settings");
-    currentUrlObj.searchParams.delete("url");
-    currentUrlObj.searchParams.delete("apikey");
-    currentUrlObj.searchParams.delete("jfserver");
-    currentUrlObj.searchParams.delete("jfapikey");
-    currentUrlObj.searchParams.delete("jfuserid");
-    currentUrlObj.searchParams.delete("linkshare");
-    currentUrlObj.searchParams.delete("captionshare");
-    currentUrlObj.searchParams.delete("peer");
+    [
+      "share",
+      "settings",
+      "url",
+      "apikey",
+      "jfserver",
+      "jfapikey",
+      "jfuserid",
+      "linkshare",
+      "captionshare",
+      "peer",
+      "ice",
+      "sid",
+      "wt",
+      "relay",
+    ].forEach((key) => currentUrlObj.searchParams.delete(key));
 
-    if (mode === "share") {
-      currentUrlObj.searchParams.set("share", "1");
-    }
+    if (mode === "share") currentUrlObj.searchParams.set("share", "1");
+    if (mode === "settings") currentUrlObj.searchParams.set("settings", "1");
+    if (mode === "linkshare") currentUrlObj.searchParams.set("linkshare", "1");
+    if (mode === "captionshare") currentUrlObj.searchParams.set("captionshare", "1");
 
-    if (mode === "settings") {
-      currentUrlObj.searchParams.set("settings", "1");
-    }
+    if (!this.#relaySession?.sessionId || !this.#relaySession?.writeToken) return "";
 
-    if (mode === "linkshare") {
-      currentUrlObj.searchParams.set("linkshare", "1");
-    }
-
-    if (mode === "captionshare") {
-      currentUrlObj.searchParams.set("captionshare", "1");
-    }
-
-    if (!this.#peerId) return "";
-
-    currentUrlObj.searchParams.set("peer", this.#peerId);
+    currentUrlObj.searchParams.set("relay", "1");
+    currentUrlObj.searchParams.set("sid", this.#relaySession.sessionId);
+    currentUrlObj.searchParams.set("wt", this.#relaySession.writeToken);
 
     return currentUrlObj.href;
   }
 
-  #getTargetPeerId() {
+  #getTargetRelayCredentials() {
     const params = new URLSearchParams(window.location.search);
-    return (params.get("peer") || "").trim();
+    const sessionId = String(params.get("sid") || "").trim();
+    const writeToken = String(params.get("wt") || "").trim();
+
+    if (!sessionId || !writeToken) return null;
+
+    return { sessionId, writeToken };
   }
 
   #isShareMode() {
@@ -382,62 +410,201 @@ export default class ShareController {
       params.get("share") === "1"
       || params.get("settings") === "1"
       || params.get("captionshare") === "1"
+      || params.get("linkshare") === "1"
     );
   }
 
-  #ensurePeerReady() {
-    if (this.#peerReadyPromise) return this.#peerReadyPromise;
+  async #ensureRelaySessionReady(force = false) {
+    if (this.#isShareMode()) return null;
 
-    if (typeof window.Peer !== "function") {
-      console.error("PeerJS is not available. Relay sharing is disabled.");
-      this.#peerReadyPromise = Promise.resolve("");
-      return this.#peerReadyPromise;
+    if (!force && this.#isRelaySessionUsable(this.#relaySession)) {
+      return this.#relaySession;
     }
 
-    this.#peer = new window.Peer();
+    if (this.#relaySessionPromise) return this.#relaySessionPromise;
 
-    this.#peerReadyPromise = new Promise((resolve) => {
-      let settled = false;
-      const finish = (peerId = "") => {
-        if (settled) return;
-        settled = true;
-        resolve(peerId);
-      };
-
-      this.#peer.on("open", (id) => {
-        this.#peerId = id || "";
+    this.#relaySessionPromise = (async () => {
+      try {
+        const session = await this.#createRelaySession();
+        this.#relaySession = session;
+        this.#lastRelayFailureReason = "";
+        this.#startRelayPolling();
         this.#refreshRelayQrs();
-        finish(this.#peerId);
-      });
 
-      this.#peer.on("connection", (connection) => {
-        this.#bindIncomingConnection(connection);
-      });
-
-      this.#peer.on("error", (error) => {
-        console.error("Peer relay error", error);
-        if (!this.#peerId) finish("");
-      });
-
-      this.#peer.on("close", () => {
-        this.#peerId = "";
+        console.log(`[relay] Session ready. sid=${session.sessionId}, expiresAt=${session.expiresAt}`);
+        return session;
+      } catch (error) {
+        this.#lastRelayFailureReason = this.#describeRelayError(error, "Unable to create relay session.");
+        console.error("[relay] Session create failed", error);
         this.#refreshRelayQrs();
-      });
-    });
+        return null;
+      } finally {
+        this.#relaySessionPromise = null;
+      }
+    })();
 
-    return this.#peerReadyPromise;
+    return this.#relaySessionPromise;
   }
 
-  #bindIncomingConnection(connection) {
-    if (!connection) return;
+  #isRelaySessionUsable(session) {
+    if (!session?.sessionId || !session?.readToken || !session?.writeToken) return false;
 
-    connection.on("data", (payload) => {
-      this.#handleIncomingPayload(payload);
+    const expiresAtMs = Date.parse(String(session.expiresAt || ""));
+    if (!Number.isFinite(expiresAtMs)) return true;
+
+    return Date.now() < (expiresAtMs - 15000);
+  }
+
+  async #createRelaySession() {
+    const response = await fetch(this.#relayApiUrl("/session/create"), {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ttlSeconds: 180,
+      }),
     });
 
-    connection.on("error", (error) => {
-      console.error("Incoming relay connection error", error);
+    const payload = await this.#parseJsonSafe(response);
+
+    if (!response.ok) {
+      const reason = payload?.error || `HTTP ${response.status}`;
+      throw new Error(`Relay session create failed: ${reason}`);
+    }
+
+    const sessionId = String(payload?.sessionId || "").trim();
+    const readToken = String(payload?.readToken || "").trim();
+    const writeToken = String(payload?.writeToken || "").trim();
+    const expiresAt = String(payload?.expiresAt || "").trim();
+
+    if (!sessionId || !readToken || !writeToken) {
+      throw new Error("Relay session response is missing required fields.");
+    }
+
+    return {
+      sessionId,
+      readToken,
+      writeToken,
+      expiresAt,
+    };
+  }
+
+  #startRelayPolling() {
+    if (this.#relayPollTimer) {
+      clearTimeout(this.#relayPollTimer);
+      this.#relayPollTimer = null;
+    }
+
+    const poll = async () => {
+      if (!this.#relaySession) return;
+
+      if (!this.#isRelaySessionUsable(this.#relaySession)) {
+        console.warn("[relay] Session is near expiration; rotating session.");
+        await this.#ensureRelaySessionReady(true);
+      } else {
+        await this.#pollRelayMessages(this.#relaySession);
+      }
+
+      this.#relayPollTimer = setTimeout(() => {
+        void poll();
+      }, 1200);
+    };
+
+    this.#relayPollTimer = setTimeout(() => {
+      void poll();
+    }, 500);
+  }
+
+  async #pollRelayMessages(session) {
+    const query = new URLSearchParams({
+      sid: session.sessionId,
+      rt: session.readToken,
     });
+
+    let response;
+    try {
+      response = await fetch(`${this.#relayApiUrl("/session/receive")}?${query.toString()}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+    } catch (error) {
+      console.warn("[relay] Poll failed due to network error", error);
+      return;
+    }
+
+    if (response.status === 404 || response.status === 410) {
+      console.warn(`[relay] Session invalid (${response.status}); creating a new session.`);
+      await this.#ensureRelaySessionReady(true);
+      return;
+    }
+
+    const payload = await this.#parseJsonSafe(response);
+
+    if (!response.ok) {
+      const reason = payload?.error || `HTTP ${response.status}`;
+      console.warn(`[relay] Poll request failed: ${reason}`);
+      return;
+    }
+
+    const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+    if (!messages.length) return;
+
+    console.log(`[relay] Received ${messages.length} relay payload(s).`);
+
+    messages.forEach((entry) => {
+      const messagePayload = entry?.payload ?? entry;
+      this.#handleIncomingPayload(messagePayload);
+    });
+  }
+
+  async #sendPayloadToCar(payload) {
+    const targetSession = this.#getTargetRelayCredentials();
+    if (!targetSession) {
+      alert("No active car session found. Scan the QR code from the car screen first.");
+      return false;
+    }
+
+    let response;
+    try {
+      response = await fetch(this.#relayApiUrl("/session/send"), {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          sessionId: targetSession.sessionId,
+          writeToken: targetSession.writeToken,
+          payload,
+        }),
+      });
+    } catch (error) {
+      const reason = this.#describeRelayError(error, "Network error while sending relay payload.");
+      this.#notifyRelaySendFailure(reason);
+      return false;
+    }
+
+    const responsePayload = await this.#parseJsonSafe(response);
+
+    if (response.ok) {
+      console.log("[relay] Payload sent successfully.");
+      return true;
+    }
+
+    const errorText = responsePayload?.error || `HTTP ${response.status}`;
+
+    if (response.status === 404 || response.status === 410) {
+      this.#notifyRelaySendFailure("Car relay session expired. Scan the latest QR from the car.");
+      return false;
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      this.#notifyRelaySendFailure("Relay authorization failed. Please scan QR again.");
+      return false;
+    }
+
+    this.#notifyRelaySendFailure(`Relay send failed: ${errorText}`);
+    return false;
   }
 
   #handleIncomingPayload(rawPayload) {
@@ -484,7 +651,7 @@ export default class ShareController {
     if (type === "caption-url") {
       const value = String(payload.value || "").trim();
       if (!value) return;
-      this.#handleIncomingCaptionUrl(value);
+      void this.#handleIncomingCaptionUrl(value);
     }
   }
 
@@ -493,7 +660,8 @@ export default class ShareController {
       this.#app.dom.urlInput.value = videoUrl;
     }
 
-    const shareVideoUrlInput = document.getElementById("shareVideoUrl");
+    const shareAppModal = document.getElementById("shareAppModal");
+    const shareVideoUrlInput = shareAppModal ? shareAppModal.querySelector("#shareVideoUrl") : document.getElementById("shareVideoUrl");
     if (shareVideoUrlInput) {
       shareVideoUrlInput.value = videoUrl;
     }
@@ -507,7 +675,7 @@ export default class ShareController {
   #handleIncomingApiKey(apiKey) {
     this.#storage.saveApiKey(apiKey);
 
-    const apiKeyInput = document.getElementById("apiKeyInput");
+    const apiKeyInput = document.getElementById("apiKey");
     if (apiKeyInput) apiKeyInput.value = apiKey;
 
     const mobileApiInput = document.getElementById("mobileJellyfinApiKeyInput");
@@ -532,10 +700,10 @@ export default class ShareController {
       userId,
     });
 
-    const serverInput = document.getElementById("jellyfinServerInput");
+    const serverInput = document.getElementById("jellyfinServer");
     if (serverInput) serverInput.value = serverUrl;
 
-    const apiKeyInput = document.getElementById("apiKeyInput");
+    const apiKeyInput = document.getElementById("apiKey");
     if (apiKeyInput) apiKeyInput.value = apiKey;
 
     const mobileServerInput = document.getElementById("mobileJellyfinServerInput");
@@ -556,12 +724,14 @@ export default class ShareController {
   }
 
   async #handleIncomingCaptionUrl(captionUrl) {
-    const captionUrlInput = document.getElementById("captionUrlInput");
+    const captionsFlow = document.querySelector("carplayer-add-captions-flow");
+    const captionUrlInput = captionsFlow ? captionsFlow.querySelector("#captionUrlInput") : document.getElementById("captionUrlInput");
     if (captionUrlInput) {
       captionUrlInput.value = captionUrl;
     }
 
-    const mobileCaptionUrlInput = document.getElementById("mobileCaptionUrlInput");
+    const mobileCaptionModal = document.getElementById("mobileCaptionModal");
+    const mobileCaptionUrlInput = mobileCaptionModal ? mobileCaptionModal.querySelector("#mobileCaptionUrlInput") : document.getElementById("mobileCaptionUrlInput");
     if (mobileCaptionUrlInput) {
       mobileCaptionUrlInput.value = captionUrl;
     }
@@ -592,69 +762,30 @@ export default class ShareController {
     }
   }
 
-  async #sendPayloadToCar(payload) {
-    const targetPeerId = this.#getTargetPeerId();
-    if (!targetPeerId) {
-      alert("No active car session found. Scan the QR code from the car screen first.");
-      return false;
+  #relayApiUrl(path) {
+    const base = RELAY_API_BASE.replace(/\/+$/, "");
+    const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+    return `${base}${normalizedPath}`;
+  }
+
+  async #parseJsonSafe(response) {
+    try {
+      return await response.json();
+    } catch (error) {
+      return null;
     }
+  }
 
-    await this.#ensurePeerReady();
+  #describeRelayError(error, fallbackMessage = "") {
+    if (!error) return fallbackMessage;
 
-    if (!this.#peer) {
-      alert("Secure relay is unavailable in this browser.");
-      return false;
-    }
+    const code = String(error.type || error.code || "").trim();
+    const message = String(error.message || "").trim();
 
-    return new Promise((resolve) => {
-      let settled = false;
-      let failureNotified = false;
-
-      const finish = (ok) => {
-        if (settled) return;
-        settled = true;
-        resolve(ok);
-      };
-
-      const notifyFailure = () => {
-        if (failureNotified) return;
-        failureNotified = true;
-        this.#notifyRelaySendFailure();
-      };
-
-      const connection = this.#peer.connect(targetPeerId, {
-        reliable: true,
-      });
-
-      const timeoutId = setTimeout(() => {
-        connection.close();
-        notifyFailure();
-        finish(false);
-      }, 8000);
-
-      connection.on("open", () => {
-        try {
-          connection.send(payload);
-          setTimeout(() => connection.close(), 250);
-          clearTimeout(timeoutId);
-          finish(true);
-        } catch (error) {
-          console.error("Relay send failed", error);
-          clearTimeout(timeoutId);
-          connection.close();
-          notifyFailure();
-          finish(false);
-        }
-      });
-
-      connection.on("error", (error) => {
-        console.error("Relay connection failed", error);
-        clearTimeout(timeoutId);
-        connection.close();
-        notifyFailure();
-        finish(false);
-      });
-    });
+    if (code && message) return `${code}: ${message}`;
+    if (message) return message;
+    if (code) return code;
+    return fallbackMessage;
   }
 
   #setShareFlowButtonState(button, success) {
@@ -685,8 +816,9 @@ export default class ShareController {
     }, durationMs);
   }
 
-  #notifyRelaySendFailure() {
-    alert("Failed to send data to car session. Please scan QR code again and retry.");
+  #notifyRelaySendFailure(details = "") {
+    const suffix = details ? `\nDetails: ${details}` : "";
+    alert(`Failed to send data to car session. Please scan QR code again and retry.${suffix}`);
   }
 
   #openHistoryShareLinkModal(videoUrl) {

@@ -4,48 +4,23 @@ export default class CarPlayerCore {
   #youtubeRegex;
 
   constructor() {
+    const mediaView = document.getElementById("mediaView");
+
     this.#dom = {
       setupScreen: document.getElementById("setupScreen"),
       playerScreen: document.getElementById("playerScreen"),
       urlInput: document.getElementById("videoUrl"),
       searchInput: document.getElementById("searchInput"),
       btnLoad: document.getElementById("btnLoad"),
-      loader: document.getElementById("loader"),
-      canvas: document.getElementById("videoCanvas"),
-      controls: document.getElementById("controls"),
-      playPauseBtn: document.getElementById("playPauseBtn"),
-      iconPlay: document.getElementById("iconPlay"),
-      iconPause: document.getElementById("iconPause"),
-      skipBackBtn: document.getElementById("skipBackBtn"),
-      skipFwdBtn: document.getElementById("skipFwdBtn"),
-      currentTimeEl: document.getElementById("currentTime"),
-      durationEl: document.getElementById("duration"),
-      progressWrapper: document.getElementById("progressWrapper"),
-      progressBufferLayer: document.getElementById("progressBufferLayer"),
-      progressFill: document.getElementById("progressFill"),
-      volumeSlider: document.getElementById("volumeSlider"),
-      muteBtn: document.getElementById("muteBtn"),
-      speedSelectWrapper: document.getElementById("speedSelectWrapper"),
-      speedSelectTrigger: document.getElementById("speedSelectTrigger"),
-      speedSelectValue: document.getElementById("speedSelectValue"),
-      speedSelectOptions: document.getElementById("speedSelectOptions"),
-      qualitySelectWrapper: document.getElementById("qualitySelectWrapper"),
-      qualitySelectTrigger: document.getElementById("qualitySelectTrigger"),
-      qualitySelectValue: document.getElementById("qualitySelectValue"),
-      qualitySelectOptions: document.getElementById("qualitySelectOptions"),
-      audioTrackSelectWrapper: document.getElementById("audioTrackSelectWrapper"),
-      audioTrackSelectTrigger: document.getElementById("audioTrackSelectTrigger"),
-      audioTrackSelectValue: document.getElementById("audioTrackSelectValue"),
-      audioTrackSelectOptions: document.getElementById("audioTrackSelectOptions"),
-      captionSelectWrapper: document.getElementById("captionSelectWrapper"),
-      captionSelectTrigger: document.getElementById("captionSelectTrigger"),
-      captionSelectValue: document.getElementById("captionSelectValue"),
-      captionSelectOptions: document.getElementById("captionSelectOptions"),
-      captionOverlay: document.getElementById("captionOverlay"),
-      historyItems: document.getElementById("historyItems"),
+      loader: mediaView ? mediaView.loader : null,
+      videoControls: document.getElementById("videoControls"),
+      canvas: mediaView ? mediaView.canvas : null,
+      captionOverlay: mediaView ? mediaView.captionOverlay : null,
+      historyComponent: document.getElementById("historyComponent"),
+      jellyfinSearchComponent: document.getElementById("jellyfinSearchComponent"),
       topBar: document.getElementById("topBar"),
       btnBack: document.getElementById("btnBack"),
-      skipIndicator: document.getElementById("skipIndicator"),
+      skipIndicator: mediaView ? mediaView.skipIndicator : null,
       videoTitleOverlay: document.getElementById("videoTitleOverlay"),
     };
 
@@ -83,19 +58,26 @@ export default class CarPlayerCore {
 
   openModal(id) {
     const modal = document.getElementById(id);
-    if (modal) modal.classList.add("active");
+    if (modal && typeof modal.open === 'function') {
+      modal.open();
+    } else if (modal) {
+      modal.classList.add("active");
+    }
   }
 
   closeModal(id) {
     const modal = document.getElementById(id);
-    if (modal) modal.classList.remove("active");
+    if (modal && typeof modal.close === 'function') {
+      modal.close();
+    } else if (modal) {
+      modal.classList.remove("active");
+    }
   }
 
   openUrlModal() {
-    if (this.#dom.urlInput) this.#dom.urlInput.value = "";
-
-    const clearVideoUrlBtn = document.getElementById("clearVideoUrlBtn");
-    if (clearVideoUrlBtn) clearVideoUrlBtn.classList.remove("is-visible");
+    // Reset the clearable-input component
+    const urlInput = document.getElementById("videoUrl");
+    if (urlInput) urlInput.value = "";
 
     if (this.#dom.btnLoad) {
       this.#dom.btnLoad.classList.add("is-disabled");

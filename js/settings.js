@@ -15,74 +15,25 @@ export default class SettingsController {
   }
 
   openModal() {
-    const serverInput = document.getElementById("jellyfinServerInput");
-    const apiKeyInput = document.getElementById("apiKeyInput");
-    const clearServerBtn = document.getElementById("clearJellyfinServerBtn");
-    const clearApiBtn = document.getElementById("clearApiKeyBtn");
+    const serverInput = document.getElementById("jellyfinServer");
+    const apiKeyInput = document.getElementById("apiKey");
+    const codecSelect = document.getElementById("jellyfinVideoCodec");
+    const bufferInput = document.getElementById("videoBuffer");
 
-    if (!serverInput || !apiKeyInput || !clearServerBtn || !clearApiBtn) return;
+    if (!serverInput || !apiKeyInput) return;
 
     const config = this.#storage.getJellyfinConfig();
     serverInput.value = config.serverUrl;
     apiKeyInput.value = config.apiKey;
 
-    const codecOptions = document.getElementById("jellyfinVideoCodecOptions");
-    const codecValueEl = document.getElementById("jellyfinVideoCodecValue");
-
-    let currentCodec = config.videoCodec || "h264";
-
-    if (codecOptions && codecValueEl) {
-      // Set initial state
-      Array.from(codecOptions.children).forEach(opt => {
-        if (opt.dataset.value === currentCodec) {
-          opt.classList.add('is-selected');
-          codecValueEl.textContent = opt.textContent;
-        } else {
-          opt.classList.remove('is-selected');
-        }
-      });
-
-      // Bind click events on the options list
-      codecOptions.onclick = (e) => {
-        const option = e.target.closest('.custom-select__option');
-        if (!option) return;
-
-        currentCodec = option.dataset.value;
-        codecValueEl.textContent = option.textContent;
-
-        Array.from(codecOptions.children).forEach(opt => {
-          opt.classList.toggle('is-selected', opt === option);
-        });
-
-        const wrapper = option.closest('.custom-select');
-        if (wrapper) wrapper.blur();
-      };
+    // Set codec select value via Web Component API
+    if (codecSelect) {
+      codecSelect.value = config.videoCodec || 'h264';
     }
 
-    clearServerBtn.classList.toggle("is-visible", serverInput.value.trim().length > 0);
-    clearApiBtn.classList.toggle("is-visible", apiKeyInput.value.trim().length > 0);
-
-    serverInput.oninput = (event) => {
-      const hasValue = event.target.value.trim().length > 0;
-      clearServerBtn.classList.toggle("is-visible", hasValue);
-    };
-
-    apiKeyInput.oninput = (event) => {
-      const hasValue = event.target.value.trim().length > 0;
-      clearApiBtn.classList.toggle("is-visible", hasValue);
-    };
-
-    clearServerBtn.onclick = () => {
-      serverInput.value = "";
-      clearServerBtn.classList.remove("is-visible");
-      serverInput.focus();
-    };
-
-    clearApiBtn.onclick = () => {
-      apiKeyInput.value = "";
-      clearApiBtn.classList.remove("is-visible");
-      apiKeyInput.focus();
-    };
+    if (bufferInput) {
+      bufferInput.value = String(this.#storage.getVideoBuffer());
+    }
 
     this.#app.openModal("settingsModal");
   }
@@ -100,21 +51,16 @@ export default class SettingsController {
     const btnSaveSettings = document.getElementById("btnSaveSettings");
     if (btnSaveSettings) {
       btnSaveSettings.addEventListener("click", () => {
-        const serverInput = document.getElementById("jellyfinServerInput");
-        const apiKeyInput = document.getElementById("apiKeyInput");
+        const serverInput = document.getElementById("jellyfinServer");
+        const apiKeyInput = document.getElementById("apiKey");
+        const codecSelect = document.getElementById("jellyfinVideoCodec");
+        const bufferInput = document.getElementById("videoBuffer");
 
         if (!serverInput || !apiKeyInput) return;
 
         const serverUrl = serverInput.value.trim();
         const apiKey = apiKeyInput.value.trim();
-
-        // Grab the selected codec by finding the .is-selected child
-        let videoCodec = "h264";
-        const codecOptions = document.getElementById("jellyfinVideoCodecOptions");
-        if (codecOptions) {
-          const selected = codecOptions.querySelector('.is-selected');
-          if (selected) videoCodec = selected.dataset.value;
-        }
+        const videoCodec = codecSelect?.value || "h264";
 
         this.#storage.saveJellyfinConfig({
           serverUrl,
@@ -122,6 +68,13 @@ export default class SettingsController {
           userId: "",
           videoCodec
         });
+
+        if (bufferInput && bufferInput.value) {
+          const parsedBuffer = parseFloat(bufferInput.value);
+          if (!isNaN(parsedBuffer) && parsedBuffer > 0) {
+            this.#storage.saveVideoBuffer(parsedBuffer);
+          }
+        }
 
         this.#app.closeModal("settingsModal");
       });

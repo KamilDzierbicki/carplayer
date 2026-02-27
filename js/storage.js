@@ -1,5 +1,3 @@
-import JellyfinService from "./jellyfin.js";
-
 export default class StorageService {
   #app;
   #historyRenderer = null;
@@ -109,6 +107,15 @@ export default class StorageService {
   getSpeed() {
     const value = parseFloat(localStorage.getItem("carplayer_speed"));
     return isNaN(value) ? 1 : value;
+  }
+
+  saveVideoBuffer(seconds) {
+    localStorage.setItem("carplayer_video_buffer", seconds);
+  }
+
+  getVideoBuffer() {
+    const value = parseFloat(localStorage.getItem("carplayer_video_buffer"));
+    return isNaN(value) ? 30 : value;
   }
 
   savePreferredQualityId(qualityId) {

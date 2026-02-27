@@ -8,41 +8,49 @@ entertainment restrictions.
 
 ## How to use in the car
 
-1. Open your car browser.
-2. Go to: [https://kamildzierbicki.github.io/carplayer/](https://kamildzierbicki.github.io/carplayer/)
-3. Click **Add Video**.
-4. Scan the QR code with your phone / You can also type a direct `.mp4` link manually
-5. Paste a video link on your phone and tap **Send to Car**.
-6. The video opens in your car browser.
+1. Open your car's browser.
+2. Go to: <https://carplayer.oxyconit.com/>.
+3. Click 'Add Video'.
+4. Scan the QR code with your phone or type a direct .mp4 link manually.
+5. Paste the video link on your phone and tap 'Send to Car'.
+6. Watch
 
 ## Functions
 
-- Play MP4 video from direct links.
-- Play YouTube videos.
-- Search YouTube directly in the app.
-- Share links from your mobile phone to the car without typing long URLs.
-- Save recent watch history.
-- Control playback speed.
-- Resume videos from the last watched timestamp.
-- Save volume and playback speed between sessions.
-- Provide fullscreen playback with a dark, easy-to-read UI.
-- All data is stored locally in your browser (no backend required)
+- Play videos from direct links (sent via QR code or entered manually).
+- Play videos from your Jellyfin server.
+- Search for Jellyfin videos directly in the app.
+- Save your recent viewing history.
+- Control the playback speed.
+- Resume videos from where you left off.
+- Save your volume, subtitles and playback speed settings between sessions.
+- All played recently, settings, api keys are stored locally in your browser.
+- Select audio, captions and video quality when using Jellyfin.
+- Large buttons designed for car displays
+- Go full-screen on Tesla cars.
+- Share links from your mobile phone to your car without having to type long URLs.
 
-## Limitations
+## Relay backend (VPS)
 
-- **Easy video link sharing**: Works with any car app that supports sending web links from your smartphone to the
-  vehicle's browser. (If not - you can still type link manually).
-- **Format Support**: Only standard MP4 containers are supported (limited by your browser). Specialized or proprietary
-  codecs may not be compatible (often video will play but without sound becuase of codecs).
-- **YouTube Videos**: Playback is limited to 360p or 720p. This is due to the browser requiring a single multiplexed
-  file (combined audio and video), whereas higher resolutions often use separate streams.
-- **API Requirements**: API key from RapidAPI is required for YouTube functionality. We welcome Pull Requests to support
-  alternative providers, such as the Invidious API if you have any idea on how to solve CORS/proxy issues.
+QR code sharing sends small payloads through a short-lived HTTP relay session:
+
+1. Car creates a relay session (`sessionId`, `readToken`, `writeToken`) with TTL.
+2. QR contains only `sessionId` + `writeToken`.
+3. Phone sends payload (`video-url`, `jellyfin-config`, `caption-url`, `redirect-url`) to relay.
+4. Car polls relay and consumes queued payloads.
+
+Why not P2P? It avoids LTE/hotspot NAT issues entirely because it is an HTTPS relay
+
+### Deploy QR relay on your VPS (Docker Compose)
+
+Start from project root: `docker compose up -d --build`
+
+Frontend relay base is hardcoded in [`js/share.js`](js/share.js): `https://carplayer.oxyconit.com/api/relay`
 
 ## Screenshots
 
-<img src="demo3.png" alt="CarPlayer screen" width="800">
 <img src="demo2.png" alt="CarPlayer screen" width="800">
+<img src="demo3.png" alt="CarPlayer screen" width="800">
 <img src="demo.png" alt="CarPlayer screen" width="800">
 
 ## Development
@@ -58,29 +66,20 @@ cd carplayer
 
 ### Run locally
 
-Option 1: Python
+Option 1: Go Server (Recommended, required for sharing link via QR code)
 
 ```bash
-python3 -m http.server 8080
+go run main.go
 ```
 
-Option 2: Node.js (no install)
-
-```bash
-npx serve -l 8080 .
-```
-
-Option 3: Docker + nginx
-
-```bash
-docker run --rm -it -p 8080:80 -v "$PWD":/usr/share/nginx/html:ro nginx:alpine
-```
-
-After that, open: `http://localhost:8080/index.html`
+*The app will be available at `http://localhost:8080/`. This runs both the static site and the relay backend.*
 
 ## Contributing
 
 Contributions are welcome.
+
+The status of this project is POC. When I have time, I will rewrite it using a more modern approach.
+I did a lot of testing and debugging, so a lot of dead code left.
 
 1. Fork the repository.
 2. Create a feature branch:`git checkout -b feature/my-change`

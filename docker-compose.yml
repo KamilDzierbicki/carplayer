@@ -1,0 +1,36 @@
+services:
+  relay:
+    build: .
+    container_name: carplayer
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    # ports:
+    #   - "8080:8080" # optional direct host access (not required with Traefik)
+    deploy:
+      resources:
+        limits:
+          cpus: 1
+          memory: 256M
+    networks:
+      - proxy
+    environment:
+      PORT: "8080"
+      ALLOWED_ORIGINS: "https://carplayer.oxyconit.com"
+      DEFAULT_SESSION_TTL_SECONDS: "180"
+      MAX_SESSION_TTL_SECONDS: "180"
+      MAX_PAYLOAD_BYTES: "4096"
+      MAX_QUEUE_MESSAGES: "32"
+      SESSION_SWEEP_MS: "30000"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.carplayer-relay-secure.entrypoints=https"
+      - "traefik.http.routers.carplayer-relay-secure.rule=Host(`carplayer.oxyconit.com`)"
+      - "traefik.http.routers.carplayer-relay-secure.tls=true"
+      - "traefik.http.routers.carplayer-relay-secure.tls.certresolver=cloudflare"
+      - "traefik.http.services.carplayer-relay.loadbalancer.server.port=8080"
+      - "traefik.docker.network=proxy"
+
+networks:
+  proxy:
+    external: true

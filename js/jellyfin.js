@@ -1,5 +1,3 @@
-import VideoTileRenderer from "./video-tile-renderer.js";
-
 export default class JellyfinService {
     #app;
     #storage;
@@ -66,7 +64,6 @@ export default class JellyfinService {
             try {
                 const parsed = new URL(raw);
                 // Safari parses custom URLs differently than Chrome
-                // pathname might be "//movies.oxyconit.com/item/1234"
                 const match = parsed.pathname.match(/\/item\/([^\/]+)/);
                 const itemId = match ? match[1] : "";
                 const host = parsed.host || parsed.hostname || (parsed.pathname.split('/')[2] || "");
@@ -90,52 +87,24 @@ export default class JellyfinService {
     }
 
     #bindEvents() {
-        const searchForm = document.querySelector(".search-bar__form");
-        const searchInput = document.getElementById("searchInput");
-        const searchClear = document.getElementById("clearSearchBtn");
-
-        if (searchForm) {
-            searchForm.addEventListener("submit", (e) => {
-                e.preventDefault();
-                this.#handleSearch(searchInput?.value);
-            });
-        }
-
-        if (searchClear && searchInput) {
-            searchInput.addEventListener("input", () => {
-                searchClear.classList.toggle("is-visible", searchInput.value.length > 0);
-                if (searchInput.value.length === 0) {
+        const appNav = document.querySelector("carplayer-navbar");
+        if (appNav) {
+            appNav.addEventListener("search", (e) => {
+                const term = e.detail;
+                if (!term) {
                     const historyTitleElement = document.getElementById("historyTitle");
                     if (historyTitleElement) historyTitleElement.textContent = "Recently Played";
-                    this.#app.dom.historyItems.innerHTML = "";
+                    if (this.#app.dom.historyComponent) {
+                        this.#app.dom.historyComponent.searchQuery = "";
+                    }
                     this.#storage.renderHistory();
+                } else {
+                    this.#handleSearch(term);
                 }
-            });
-
-            searchClear.addEventListener("click", () => {
-                const historyTitleElement = document.getElementById("historyTitle");
-                if (historyTitleElement) historyTitleElement.textContent = "Recently Played";
-
-                searchInput.value = "";
-                searchClear.classList.remove("is-visible");
-                searchInput.focus();
-                this.#app.dom.historyItems.innerHTML = "";
-                this.#storage.renderHistory();
             });
         }
     }
 
-    #clearSearch() {
-        const searchInput = document.getElementById("searchInput");
-        const searchClear = document.getElementById("clearSearchBtn");
-        const historyTitleElement = document.getElementById("historyTitle");
-
-        if (searchInput) searchInput.value = "";
-        if (searchClear) searchClear.classList.remove("is-visible");
-        if (historyTitleElement) historyTitleElement.textContent = "Recently Played";
-        if (this.#app.dom.historyItems) this.#app.dom.historyItems.innerHTML = "";
-        this.#storage.renderHistory();
-    }
 
     async #handleSearch(query) {
         const term = String(query || "").trim();
@@ -150,65 +119,47 @@ export default class JellyfinService {
             return;
         }
 
-        const HistoryRenderer = this.#app.dom.historyItems;
-        if (HistoryRenderer) {
-            HistoryRenderer.innerHTML = '<div class="loader is-visible" aria-hidden="true" style="margin: 20px auto;"></div>';
-            const historyTitleElement = document.getElementById("historyTitle");
-            if (historyTitleElement) {
-                historyTitleElement.innerHTML = `<button class="btn-back-search" id="btnBackFromSearch" type="button" title="Back to Recently Played"><span class="icon icon--sm icon-mask icon-mask--back" aria-hidden="true"></span></button> Search Results`;
-                const backBtn = document.getElementById("btnBackFromSearch");
-                if (backBtn) {
-                    backBtn.addEventListener("click", () => this.#clearSearch());
-                }
-            }
+        const historyComponent = this.#app.dom.historyComponent;
+        const searchComponent = this.#app.dom.jellyfinSearchComponent;
 
-            const clearHistoryButton = document.getElementById("btnClearHistory");
-            if (clearHistoryButton) clearHistoryButton.classList.add("hidden");
-        }
+        if (historyComponent && searchComponent) {
+            historyComponent.classList.add("hidden");
+            searchComponent.classList.remove("hidden");
 
-        try {
-            const jf = new Jellyfin(serverUrl, apiKey);
-            const results = await jf.search(term);
+            searchComponent.setAttribute("server-url", serverUrl);
+            searchComponent.setAttribute("api-key", apiKey);
+            searchComponent.setAttribute("query", term);
 
-            if (HistoryRenderer) {
-                HistoryRenderer.innerHTML = "";
-            }
-
-            if (!results || results.length === 0) {
-                if (HistoryRenderer) {
-                    HistoryRenderer.innerHTML = `<div class="text-empty-state">No results found for "${term}".</div>`;
-                }
-                return;
-            }
-
-            if (HistoryRenderer) {
-                results.forEach(item => {
-                    const tile = VideoTileRenderer.createJellyfinSearchTile({
-                        id: item.id,
-                        title: item.name,
-                        thumbnailUrl: item.thumb,
-                        typeText: item.type,
-                        year: item.year,
-                        serverBaseUrl: serverUrl
-                    });
-                    HistoryRenderer.appendChild(tile);
-                });
-            }
-        } catch (error) {
-            console.error("Jellyfin search error:", error);
-            if (HistoryRenderer) {
-                HistoryRenderer.innerHTML = `<div class="text-empty-state">Search failed: ${error.message}</div>`;
+            // Listen for back event if not already listening
+            if (!searchComponent._backListenerAttached) {
+                searchComponent.addEventListener("back", () => this.#clearSearch());
+                searchComponent._backListenerAttached = true;
             }
         }
     }
+
+    #clearSearch() {
+        const appNav = document.querySelector("carplayer-navbar");
+        if (appNav) appNav.clearSearch();
+
+        const historyComponent = this.#app.dom.historyComponent;
+        const searchComponent = this.#app.dom.jellyfinSearchComponent;
+
+        if (historyComponent && searchComponent) {
+            searchComponent.classList.add("hidden");
+            searchComponent.removeAttribute("query");
+            historyComponent.classList.remove("hidden");
+        }
+
+        this.#storage.renderHistory();
+    }
 }
 
-// Ensure the HLS bitrates match x5.html
 export const HLS_BITRATES = { 360: 1000000, 480: 2500000, 720: 5000000, 1080: 8000000 };
 
 export class Jellyfin {
     #baseUrl; #apiKey; #authHeaderValue;
-    constructor(baseUrl, apiKey, clientName = "CanvasPlayer", deviceName = "Web", deviceId = "js-123") {
+    constructor(baseUrl, apiKey, clientName = "CarPlayer", deviceName = "Web", deviceId = "js-123") {
         this.#baseUrl = baseUrl.replace(/\/$/, ""); this.#apiKey = apiKey;
         this.#authHeaderValue = `MediaBrowser Token="${this.#apiKey}", Client="${clientName}", Device="${deviceName}", DeviceId="${deviceId}", Version="1.0.0"`;
     }
@@ -226,7 +177,8 @@ export class Jellyfin {
     async search(searchTerm) {
         const params = new URLSearchParams({
             searchTerm: searchTerm,
-            includeItemTypes: "Movie,Episode",
+            includeItemTypes: "Movie,Episode,Video",
+            mediaTypes: "Video",
             recursive: true,
             fields: "PrimaryImageAspectRatio,DateCreated",
         });

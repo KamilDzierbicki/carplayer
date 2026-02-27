@@ -1,11 +1,9 @@
 import { ALL_FORMATS, AudioBufferSink, CanvasSink, Input, UrlSource, ReadableStreamSource, MPEG_TS } from 'https://cdn.jsdelivr.net/npm/mediabunny@1.34.5/+esm';
 import { registerAc3Decoder } from 'https://cdn.jsdelivr.net/npm/@mediabunny/ac3@1.34.5/+esm';
 
-// Register AC3
+// Register AC3 decoder to enable passthrough support for AC3 audio in Jellyfin HLS streams (which is common for Dolby Digital 5.1 tracks)
 registerAc3Decoder();
 
-// Constants
-const HLS_BITRATES = { 360: 1000000, 480: 2500000, 720: 5000000, 1080: 8000000 };
 const HLS_CACHE_SIZE = 256 * 1024 * 1024;
 const SEGMENT_MAX_RETRIES = 5;
 const SEGMENT_RETRY_BASE_MS = 1500;
@@ -17,7 +15,7 @@ const getTrackId = (track) => {
     return String(id).trim();
 };
 
-const formatSeconds = (seconds) => {
+export const formatSeconds = (seconds) => {
     const safe = Math.max(0, Number(seconds) || 0);
     const hours = Math.floor(safe / 3600);
     const minutes = Math.floor((safe % 3600) / 60);
@@ -240,11 +238,9 @@ export class JellyfinAdapter extends BaseSourceAdapter {
 
 // ── SubtitleManager ────────────────────────────────────
 class SubtitleManager {
-    constructor(captionOverlay, subtitleSelectTrigger, subtitleSelectValue, subtitleSelectOptions) {
+    constructor(captionOverlay, captionSelectEl) {
         this._overlay = captionOverlay;
-        this._selectTrigger = subtitleSelectTrigger;
-        this._selectValue = subtitleSelectValue;
-        this._selectOptions = subtitleSelectOptions;
+        this._selectEl = captionSelectEl; // <carplayer-custom-select>
 
         this._tracksById = new Map();
         this._options = [{ id: 'off', label: 'Captions Off' }];
@@ -254,27 +250,23 @@ class SubtitleManager {
         this._loadToken = 0;
         this._getPlaybackTime = () => 0;
 
-        if (this._selectOptions) {
-            this._selectOptions.addEventListener('click', (e) => {
-                const option = e.target.closest('.custom-select__option');
-                if (!option) return;
-                const value = option.dataset.value;
+        if (this._selectEl) {
+            this._selectEl.addEventListener('change', (e) => {
+                const value = e.detail?.value;
                 if (value === 'custom') {
-                    const wrapper = this._selectTrigger?.closest('.custom-select');
-                    if (wrapper) wrapper.blur();
+                    this._selectEl.blur();
                     const modal = document.getElementById('captionsModal');
-                    if (modal && typeof window.app?.openModal === 'function') {
-                        window.app.openModal('captionsModal');
+                    if (modal && typeof modal.open === 'function') {
+                        modal.open();
                     } else if (modal) {
                         modal.classList.add('active');
                     }
                     return;
                 }
-                if (value) this.selectTrack(value);
-
-                // Close dropdown
-                const wrapper = this._selectTrigger?.closest('.custom-select');
-                if (wrapper) wrapper.blur();
+                if (value) {
+                    this.selectTrack(value);
+                    if (this.onTrackSelected) this.onTrackSelected(value);
+                }
             });
         }
     }
@@ -284,11 +276,14 @@ class SubtitleManager {
     renderText(text) {
         if (!this._overlay) return;
         const safe = String(text || '').trim();
-        this._overlay.textContent = safe;
-        this._overlay.classList.toggle('is-visible', Boolean(safe));
+
         if (safe) {
+            this._overlay.innerHTML = `<span class="caption-overlay__text">${safe}</span>`;
+            this._overlay.classList.add('is-visible');
             this._overlay.style.opacity = '1';
         } else {
+            this._overlay.innerHTML = '';
+            this._overlay.classList.remove('is-visible');
             this._overlay.style.opacity = '0';
         }
     }
@@ -322,33 +317,24 @@ class SubtitleManager {
     resetState() { this._cues = []; this._cueIdx = 0; this.renderText(''); }
 
     syncSelector() {
-        if (!this._selectOptions || !this._selectValue) return;
+        if (!this._selectEl) return;
 
-        this._selectOptions.innerHTML = '';
-        this._options.forEach(opt => {
-            const div = document.createElement('div');
-            div.className = 'custom-select__option';
-            div.dataset.value = opt.id;
-            div.textContent = opt.label;
-            if (opt.id === this._selectedId) {
-                div.classList.add('is-selected');
-                this._selectValue.textContent = opt.label;
-            }
-            this._selectOptions.appendChild(div);
-        });
+        const items = this._options.map(opt => ({
+            value: opt.id,
+            label: opt.label,
+            selected: opt.id === this._selectedId,
+        }));
+        // Add "Add Custom Captions..." action option
+        items.push({ value: 'custom', label: 'Add Custom Captions...' });
 
-        const customDiv = document.createElement('div');
-        customDiv.className = 'custom-select__option';
-        customDiv.dataset.value = 'custom';
-        customDiv.textContent = 'Add Custom Captions...';
-        this._selectOptions.appendChild(customDiv);
+        this._selectEl.setOptions(items);
 
         const validMatch = this._options.find(o => o.id === this._selectedId);
         if (!validMatch) {
             this._selectedId = 'off';
-            this._selectValue.textContent = 'Captions Off';
-            const offOpt = this._selectOptions.querySelector('[data-value="off"]');
-            if (offOpt) offOpt.classList.add('is-selected');
+            this._selectEl.value = 'off';
+        } else {
+            this._selectEl.value = this._selectedId;
         }
     }
 
@@ -495,12 +481,9 @@ class SubtitleManager {
 
 // ── AudioManager ───────────────────────────────────────
 class AudioManager {
-    constructor(audioTrackSelectTrigger, audioTrackSelectValue, audioTrackSelectOptions, volumeSlider, muteBtn, storage) {
-        this._selectTrigger = audioTrackSelectTrigger;
-        this._selectValue = audioTrackSelectValue;
-        this._selectOptions = audioTrackSelectOptions;
-        this._volumeSlider = volumeSlider;
-        this._muteBtn = muteBtn;
+    constructor(audioTrackSelectEl, volumeControlEl, storage) {
+        this._selectEl = audioTrackSelectEl; // <carplayer-custom-select>
+        this._volumeControl = volumeControlEl; // <carplayer-volume-control>
         this.storage = storage;
 
         this.context = null;
@@ -510,95 +493,68 @@ class AudioManager {
         this.tracks = [];
         this.selectedIndex = 0;
         this.volumeLevel = this.storage.getVolume();
-        this.isMuted = false;
         this.queuedNodes = new Set();
 
-        if (this._selectOptions) {
-            this._selectOptions.addEventListener('click', (e) => {
-                const option = e.target.closest('.custom-select__option');
-                if (!option) return;
-                const value = parseInt(option.dataset.value, 10);
+        if (this._selectEl) {
+            this._selectEl.addEventListener('change', (e) => {
+                const value = parseInt(e.detail?.value, 10);
                 if (!isNaN(value)) {
                     if (this.onTrackSelected) this.onTrackSelected(value);
                 }
-                const wrapper = this._selectTrigger?.closest('.custom-select');
-                if (wrapper) wrapper.blur();
             });
         }
 
-        if (this._muteBtn) {
-            this._muteBtn.addEventListener('click', () => {
-                this.isMuted = !this.isMuted;
-                this.updateVolumeState();
-            });
-        }
+        if (this._volumeControl) {
+            // Set initial value to component so it reflects storage
+            this._volumeControl.volume = this.volumeLevel;
 
-        if (this._volumeSlider) {
-            this._volumeSlider.value = this.volumeLevel;
-            this._volumeSlider.addEventListener('input', (e) => {
-                this.isMuted = false;
-                this.volumeLevel = Number(e.target.value) || 0;
-                this.updateVolumeState();
+            this._volumeControl.addEventListener('volumechange', (e) => {
+                this.volumeLevel = e.detail.volume;
                 this.storage.saveVolume(this.volumeLevel);
+                this.updateVolumeState();
             });
         }
     }
 
     updateVolumeState() {
-        const vol = this.isMuted ? 0 : this.volumeLevel;
-        if (this._volumeSlider) this._volumeSlider.value = String(vol);
-        if (this.gainNode) this.gainNode.gain.value = vol * vol;
-
-        if (this._muteBtn) {
-            const isMuted = vol === 0;
-            this._muteBtn.innerHTML = isMuted
-                ? '<span class="icon icon--md icon-mask icon-mask--volume-mute" aria-hidden="true"></span>'
-                : '<span class="icon icon--md icon-mask icon-mask--volume" aria-hidden="true"></span>';
+        if (this.gainNode) {
+            const effectiveVol = this._volumeControl ? this._volumeControl.effectiveVolume : this.volumeLevel;
+            this.gainNode.gain.value = effectiveVol * effectiveVol;
         }
     }
 
     syncSelector() {
-        const wrapper = this._selectTrigger?.closest('.custom-select');
+        if (!this._selectEl) return;
 
         if (!this.tracks.length && !this._metaTracks?.length) {
-            if (this._selectOptions) this._selectOptions.innerHTML = '<div class="custom-select__option" data-value="-1">No audio</div>';
-            if (this._selectValue) this._selectValue.textContent = 'No audio';
-            if (wrapper) wrapper.classList.add('hidden');
+            this._selectEl.setOptions([{ value: '-1', label: 'No audio' }]);
+            this._selectEl.hide();
             return;
         }
 
-        if (wrapper) wrapper.classList.remove('hidden');
+        this._selectEl.show();
 
         if (this._metaTracks?.length) {
-            if (this._selectOptions) {
-                this._selectOptions.innerHTML = this._metaTracks.map(t =>
-                    `<div class="custom-select__option ${t.index === this._selectedMetaIndex ? 'is-selected' : ''}" data-value="${t.index}">${t.label}</div>`
-                ).join('');
-            }
-            if (this._selectValue) {
-                const sel = this._metaTracks.find(t => t.index === this._selectedMetaIndex) || this._metaTracks[0];
-                this._selectValue.textContent = sel ? sel.label : 'Audio';
-            }
+            const items = this._metaTracks.map(t => ({
+                value: String(t.index),
+                label: t.label,
+                selected: t.index === this._selectedMetaIndex,
+            }));
+            this._selectEl.setOptions(items);
             return;
         }
 
-        if (this._selectOptions) {
-            this._selectOptions.innerHTML = this.tracks.map((track, i) => {
-                let label = String(track?.name || '').trim();
-                if (!label || label === `Audio ${i + 1}`) {
-                    const lang = track?.language || '';
-                    const codec = track?.codec || '';
-                    const parts = [lang, codec].filter(Boolean).join(' / ');
-                    label = parts ? `Audio ${i + 1} (${parts})` : `Audio ${i + 1}`;
-                }
-                return `<div class="custom-select__option ${i === this.selectedIndex ? 'is-selected' : ''}" data-value="${i}">${label}</div>`;
-            }).join('');
-        }
-
-        if (this._selectValue) {
-            const selOpt = this._selectOptions?.querySelector('.is-selected');
-            if (selOpt) this._selectValue.textContent = selOpt.textContent;
-        }
+        const items = this.tracks.map((track, i) => {
+            let label = String(track?.name || '').trim();
+            if (!label || label === `Audio ${i + 1}`) {
+                const lang = track?.language || '';
+                const codec = track?.codec || '';
+                const parts = [lang, codec].filter(Boolean).join(' / ');
+                label = parts ? `Audio ${i + 1} (${parts})` : `Audio ${i + 1}`;
+            }
+            return { value: String(i), label, selected: i === this.selectedIndex };
+        });
+        this._selectEl.setOptions(items);
     }
 
     setTrackByIndex(index, { restartPlayback = true, getPlaybackTime, playing, pause, play } = {}) {
@@ -662,20 +618,16 @@ export default class PlayerController {
         this.canvas = this.dom.canvas;
         this.ctx = this.dom.ctx || this.canvas.getContext('2d');
         this.loader = this.dom.loader;
+        this.topBar = document.getElementById("topBar");
 
         this.subs = new SubtitleManager(
             this.dom.captionOverlay,
-            this.dom.captionSelectTrigger,
-            this.dom.captionSelectValue,
-            this.dom.captionSelectOptions
+            this.dom.videoControls.captionSelect
         );
 
         this.audio = new AudioManager(
-            this.dom.audioTrackSelectTrigger,
-            this.dom.audioTrackSelectValue,
-            this.dom.audioTrackSelectOptions,
-            this.dom.volumeSlider,
-            this.dom.muteBtn,
+            this.dom.videoControls.audioTrackSelect,
+            this.dom.videoControls.volumeControl,
             this.storage
         );
 
@@ -695,7 +647,7 @@ export default class PlayerController {
         this.bufferedUntil = 0;
         this.hideControlsTimeout = null;
 
-        this.TARGET_BUFFER_SECONDS = 15;
+        this.TARGET_BUFFER_SECONDS = this.storage.getVideoBuffer();
         this.AUTO_HIDE_DELAY_MS = 3000;
 
         this.currentUrl = '';
@@ -722,15 +674,11 @@ export default class PlayerController {
     }
 
     updatePlayPauseIcon() {
-        if (this.playing) {
-            this.dom.playPauseBtn.classList.add("is-playing");
-            this.dom.iconPlay.classList.add("hidden");
-            this.dom.iconPause.classList.remove("hidden");
-            this.dom.skipIndicator?.classList.add("hidden");
-        } else {
-            this.dom.playPauseBtn.classList.remove("is-playing");
-            this.dom.iconPlay.classList.remove("hidden");
-            this.dom.iconPause.classList.add("hidden");
+        if (this.dom.videoControls) {
+            this.dom.videoControls.playing = this.playing;
+        }
+        if (this.playing && this.dom.skipIndicator) {
+            // No longer adding 'hidden' here as it conflicts with our glossy overlay
         }
     }
 
@@ -738,49 +686,41 @@ export default class PlayerController {
         if (this.hideControlsTimeout !== null) { clearTimeout(this.hideControlsTimeout); this.hideControlsTimeout = null; }
     }
 
+    setControlsIdleState(idle) {
+        const isIdle = Boolean(idle);
+        this.dom.videoControls?.setIdle(isIdle);
+        this.topBar?.setIdle(isIdle);
+        this.dom.captionOverlay?.classList.toggle('controls-idle', isIdle);
+        this.dom.playerScreen.style.cursor = isIdle ? 'none' : 'default';
+    }
+
     scheduleAutoHide() {
         this.clearHideTimer();
         if (!this.playing || this.draggingProgressBar) return;
         this.hideControlsTimeout = setTimeout(() => {
             if (this.playing && !this.draggingProgressBar) {
-                this.dom.controls?.classList.add('idle');
-                this.dom.topBar?.classList.add('idle');
-                this.dom.playerScreen.style.cursor = 'none';
-                this.dom.qualitySelectWrapper?.blur();
+                this.setControlsIdleState(true);
+                this.dom.videoControls?.qualitySelect?.blur();
             }
         }, this.AUTO_HIDE_DELAY_MS);
     }
 
     showControls() {
-        this.dom.controls?.classList.remove('idle');
-        this.dom.topBar?.classList.remove('idle');
-        this.dom.playerScreen.style.cursor = 'default';
+        this.setControlsIdleState(false);
         this.scheduleAutoHide();
     }
 
     updateProgressBarTime(seconds) {
-        if (!this.totalDuration) { this.dom.currentTimeEl.textContent = '00:00'; this.dom.progressFill.style.width = '0%'; return; }
+        if (!this.totalDuration) { this.dom.videoControls?.setTime(0, 0); return; }
         const safe = Math.max(0, Math.min(seconds, this.totalDuration));
-        this.dom.currentTimeEl.textContent = formatSeconds(safe);
-        this.dom.progressFill.style.width = `${(safe / this.totalDuration) * 100}%`;
+        this.dom.videoControls?.setTime(safe, this.totalDuration);
     }
 
     updateBufferedBar() {
-        if (!this.dom.progressBufferLayer) return;
-
-        // Use the existing DOM logic but we recreate segments since it's simpler
-        this.dom.progressBufferLayer.innerHTML = '';
+        if (!this.dom.videoControls?.progressBar) return;
         if (!this.totalDuration || this.bufferedUntil <= this.bufferedFrom) return;
 
-        const f = Math.max(0, Math.min(this.bufferedFrom, this.totalDuration));
-        const u = Math.max(f, Math.min(this.bufferedUntil, this.totalDuration));
-
-        const seg = document.createElement("div");
-        seg.className = "progress-buffer-segment";
-        seg.style.left = `${(f / this.totalDuration) * 100}%`;
-        seg.style.width = `${((u - f) / this.totalDuration) * 100}%`;
-
-        this.dom.progressBufferLayer.appendChild(seg);
+        this.dom.videoControls.progressBar.setBuffered(this.bufferedFrom, this.bufferedUntil);
     }
 
     resetBufferedBar(time = 0) { this.bufferedFrom = Math.max(0, Number(time) || 0); this.bufferedUntil = this.bufferedFrom; this.updateBufferedBar(); }
@@ -954,12 +894,8 @@ export default class PlayerController {
     }
 
     _updateSpeedUI(speed) {
-        if (this.dom.speedSelectValue) this.dom.speedSelectValue.textContent = `${speed}x`;
-        if (this.dom.speedSelectOptions) {
-            const opts = Array.from(this.dom.speedSelectOptions.children);
-            opts.forEach(o => o.classList.remove('is-selected'));
-            const match = opts.find(o => parseFloat(o.dataset.value) === speed);
-            if (match) match.classList.add('is-selected');
+        if (this.dom.videoControls?.speedSelect) {
+            this.dom.videoControls.speedSelect.value = String(speed);
         }
     }
 
@@ -991,8 +927,8 @@ export default class PlayerController {
         if (!adapter) return;
         this.currentUrl = options.url || '';
 
-        if (this.dom.videoTitleOverlay) {
-            this.dom.videoTitleOverlay.textContent = options.title || '';
+        if (this.topBar) {
+            this.topBar.setAttribute("video-title", options.title || '');
         }
 
         try {
@@ -1001,7 +937,10 @@ export default class PlayerController {
             // Switch UI immediately
             this.dom.setupScreen.classList.add('hidden');
             this.dom.playerScreen.classList.add('active');
-            this.dom.videoTitleOverlay.style.opacity = '1';
+
+            if (this.topBar) {
+                this.topBar.style.opacity = '1';
+            }
 
             this.loader.classList.add('is-visible');
 
@@ -1020,8 +959,7 @@ export default class PlayerController {
             const input = await adapter.createInput(options.startTime || 0);
             this.totalDuration = await adapter.getDuration(input);
             this.playbackTimeAtStart = options.startTime || 0;
-            this.dom.currentTimeEl.textContent = formatSeconds(this.playbackTimeAtStart);
-            this.dom.durationEl.textContent = formatSeconds(this.totalDuration);
+            this.updateProgressBarTime(this.playbackTimeAtStart);
             this.resetBufferedBar(0);
 
             let videoTrack = await input.getPrimaryVideoTrack();
@@ -1029,8 +967,9 @@ export default class PlayerController {
             let audioTracks = await this.audio.collectTracks(input, primaryAudioTrack);
             const subtitleTracks = await this.subs.collectTracks(input);
 
-            if (this.dom.qualitySelectWrapper) {
-                this.dom.qualitySelectWrapper.classList.toggle('hidden', typeof adapter.getAudioStreamInfo !== 'function');
+            if (this.dom.videoControls?.qualitySelect) {
+                if (typeof adapter.getAudioStreamInfo !== 'function') this.dom.videoControls.qualitySelect.hide();
+                else this.dom.videoControls.qualitySelect.show();
             }
 
             if (!(await canDecodeTrack(videoTrack))) videoTrack = null;
@@ -1069,6 +1008,13 @@ export default class PlayerController {
                 const historyManualCap = this.storage.getManualCaptionUrl(this.currentUrl);
                 if (historyManualCap) {
                     await this.subs.loadExternalFromUrl(historyManualCap);
+                }
+
+                // Restore saved subtitle selection
+                const id = this.storage.extractId(this.currentUrl);
+                const historyItem = this.storage.getHistory().find(h => h.id === id);
+                if (historyItem && historyItem.subtitleTrackId) {
+                    await this.subs.selectTrack(historyItem.subtitleTrackId);
                 }
             }
 
@@ -1116,13 +1062,42 @@ export default class PlayerController {
     }
 
     // Main entry point for playing Jellyfin
-    async loadJellyfinItem(jf, itemId, title, sessionUrl, qualityStr) {
-        const { time } = this.storage.getPlaybackPos(sessionUrl);
-        await this.initMediaPlayer(new JellyfinAdapter(jf, itemId, this.storage, qualityStr), {
-            url: sessionUrl,
-            title: title || `Jellyfin Video`,
-            startTime: time || 0
-        });
+    async loadJellyfinItem(jf, itemId, title, url, qualityStr) {
+
+        this.dom.setupScreen.classList.add('hidden');
+        this.dom.playerScreen.classList.add('active');
+        this.loader.classList.add('is-visible');
+
+        try {
+            const adapter = new JellyfinAdapter(jf, itemId, this.storage, qualityStr);
+
+            const displayTitle = title || this.getVideoTitleFromUrl(url) || 'Jellyfin Video';
+            if (this.topBar) {
+                this.topBar.setAttribute("video-title", displayTitle);
+            }
+
+            this.currentUrl = url;
+            const { time } = this.storage.getPlaybackPos(url);
+
+            await this.initMediaPlayer(adapter, { url: url, title: displayTitle, startTime: time || 0 });
+
+            if (this.historyRenderer) {
+                this.historyRenderer.render();
+            }
+        } catch (error) {
+            console.error("Jellyfin Playback Error:", error);
+            this.loader.classList.remove('is-visible');
+            this.dom.playerScreen.classList.remove('active');
+            this.dom.setupScreen.classList.remove('hidden');
+
+            // Clean up potentially hung player state
+            if (this.audio.context) { await this.audio.context.close(); this.audio.context = null; }
+            this.fileLoaded = false;
+            this.playing = false;
+            this.updatePlayPauseIcon();
+
+            alert(`Unable to play video.\n\nCheck if your Jellyfin server is accessible and CORS is configured.\n\nDebug: ${error.message}`);
+        }
     }
 
     async loadExternalCaptionUrl(captionUrl) {
@@ -1160,34 +1135,100 @@ export default class PlayerController {
     }
 
     _bindEvents() {
-        if (this.dom.skipBackBtn) {
-            this.dom.skipBackBtn.addEventListener('click', () => {
-                this._triggerSkipIndicator('backward');
-                this.seekToTime(this.getPlaybackTime() - 10);
+        if (this.dom.videoControls) {
+            this.dom.videoControls.addEventListener('action-skip', (e) => {
+                const dir = e.detail > 0 ? 'forward' : 'backward';
+                this._triggerSkipIndicator(dir);
+                this.seekToTime(this.getPlaybackTime() + e.detail);
             });
-        }
-        if (this.dom.skipFwdBtn) {
-            this.dom.skipFwdBtn.addEventListener('click', () => {
-                this._triggerSkipIndicator('forward');
-                this.seekToTime(this.getPlaybackTime() + 10);
+            this.dom.videoControls.addEventListener('action-play', () => this.play());
+            this.dom.videoControls.addEventListener('action-pause', () => this.pause());
+
+            this.dom.videoControls.progressBar.addEventListener('seek-preview', (e) => {
+                this.draggingProgressBar = true;
+                this.updateProgressBarTime(e.detail);
             });
+            this.dom.videoControls.progressBar.addEventListener('seek', (e) => {
+                this.draggingProgressBar = false;
+                this.seekToTime(e.detail);
+                this.scheduleAutoHide();
+            });
+
+            if (this.dom.videoControls.speedSelect) {
+                this.dom.videoControls.speedSelect.addEventListener('change', (e) => {
+                    this.changeSpeed(e.detail.value);
+                });
+            }
+
+            if (this.dom.videoControls.qualitySelect) {
+                const preferredQuality = this.storage.getPreferredQualityId() || '720';
+                this.dom.videoControls.qualitySelect.value = preferredQuality;
+
+                this.dom.videoControls.qualitySelect.addEventListener('change', async (e) => {
+                    const value = e.detail.value;
+                    this.storage.savePreferredQualityId(value);
+
+                    if (this.adapter && typeof this.adapter.setQuality === 'function') {
+                        const currentTime = this.getPlaybackTime();
+                        this.adapter.setQuality(value);
+                        await this.seekToTime(currentTime);
+                    }
+                });
+            }
         }
-        this.dom.playPauseBtn.addEventListener('click', () => this.togglePlay());
+
+        this.topBar?.addEventListener("back", () => this._handleBack());
+
+        let lastClickTime = 0;
+        let lastClickPosition = '';
+
         this.dom.playerScreen.addEventListener('click', (e) => {
             // Handle clicking the background to show skip indicators/playpause
-            if (!e.target.closest('.player-controls') && !e.target.closest('.player-topbar') && !e.target.closest('.modal')) {
+            if (!e.target.closest('carplayer-video-controls') && !e.target.closest('.player-topbar') && !e.target.closest('.modal')) {
+
+                // If the user clicks the screen just to dismiss an open select menu, ignore the click
+                if (document.querySelector('carplayer-custom-select.is-open')) {
+                    return;
+                }
+
                 const screenWidth = window.innerWidth;
                 const clickX = e.clientX;
                 const thirdOfScreen = screenWidth / 3;
 
-                if (clickX < thirdOfScreen) {
-                    this._triggerSkipIndicator('backward');
-                    this.seekToTime(this.getPlaybackTime() - 10);
-                } else if (clickX > screenWidth - thirdOfScreen) {
-                    this._triggerSkipIndicator('forward');
-                    this.seekToTime(this.getPlaybackTime() + 10);
-                } else {
+                const now = Date.now();
+                const timeSinceLastClick = now - lastClickTime;
+
+                let position = 'middle';
+                if (clickX < thirdOfScreen) position = 'left';
+                else if (clickX > screenWidth - thirdOfScreen) position = 'right';
+
+                if (position === 'middle') {
+                    // Immediate toggle for middle click
+                    lastClickTime = 0;
+                    clearTimeout(this.clickTimeout);
                     this.togglePlay();
+                } else {
+                    // Left or Right edges
+                    if (timeSinceLastClick < 300 && lastClickPosition === position) {
+                        // Double click
+                        clearTimeout(this.clickTimeout);
+                        if (position === 'left') {
+                            this._triggerSkipIndicator('backward');
+                            this.seekToTime(this.getPlaybackTime() - 10);
+                        } else {
+                            this._triggerSkipIndicator('forward');
+                            this.seekToTime(this.getPlaybackTime() + 10);
+                        }
+                        lastClickTime = 0; // Reset to require another double click
+                    } else {
+                        // Single click (wait to see if it becomes double)
+                        lastClickTime = now;
+                        lastClickPosition = position;
+                        clearTimeout(this.clickTimeout);
+                        this.clickTimeout = setTimeout(() => {
+                            this.togglePlay();
+                        }, 300);
+                    }
                 }
             }
         });
@@ -1197,59 +1238,16 @@ export default class PlayerController {
         this.dom.playerScreen.addEventListener('mouseleave', () => {
             this.clearHideTimer();
             if (this.playing && !this.draggingProgressBar) {
-                this.dom.controls?.classList.add('idle');
-                this.dom.topBar?.classList.add('idle');
-                this.dom.playerScreen.style.cursor = 'none';
+                this.setControlsIdleState(true);
             }
         });
 
-        if (this.dom.speedSelectOptions) {
-            this.dom.speedSelectOptions.addEventListener('click', (e) => {
-                const option = e.target.closest('.custom-select__option');
-                if (option && option.dataset.value) {
-                    this.changeSpeed(option.dataset.value);
-                    const wrapper = this.dom.speedSelectTrigger?.closest('.custom-select');
-                    if (wrapper) wrapper.blur();
-                }
-            });
-        }
-
-        if (this.dom.qualitySelectOptions) {
-            const preferredQuality = this.storage.getPreferredQualityId() || '720';
-            Array.from(this.dom.qualitySelectOptions.children).forEach(o => {
-                if (o.dataset.value === preferredQuality) {
-                    o.classList.add('is-selected');
-                    if (this.dom.qualitySelectValue) this.dom.qualitySelectValue.textContent = o.textContent;
-                } else {
-                    o.classList.remove('is-selected');
-                }
-            });
-
-            this.dom.qualitySelectOptions.addEventListener('click', async (e) => {
-                const option = e.target.closest('.custom-select__option');
-                if (!option || !option.dataset.value) return;
-
-                const value = option.dataset.value;
-                this.dom.qualitySelectValue.textContent = option.textContent;
-
-                // Update selection visually
-                Array.from(this.dom.qualitySelectOptions.children).forEach(o => o.classList.remove('is-selected'));
-                option.classList.add('is-selected');
-
-                this.storage.savePreferredQualityId(value);
-
-                const wrapper = this.dom.qualitySelectTrigger?.closest('.custom-select');
-                if (wrapper) wrapper.blur();
-
-                if (this.adapter && typeof this.adapter.setQuality === 'function') {
-                    const currentTime = this.getPlaybackTime();
-                    this.adapter.setQuality(value);
-                    await this.seekToTime(currentTime);
-                }
-            });
-        }
-
-        this.dom.progressWrapper.addEventListener('pointerdown', (e) => this._startProgressDrag(e));
+        // Subtitle Track changes
+        this.subs.onTrackSelected = (selectedValue) => {
+            if (this.currentUrl) {
+                this.storage.updateHistoryItem(this.currentUrl, { subtitleTrackId: selectedValue });
+            }
+        };
 
         // Audio Track changes -> pass to AudioManager handler
         this.audio.onTrackSelected = async (selectedValue) => {
@@ -1276,41 +1274,26 @@ export default class PlayerController {
         });
     }
 
-    _startProgressDrag(event) {
-        if (!this.totalDuration) return;
-        this.draggingProgressBar = true;
-        this.showControls();
-        this.dom.progressWrapper.setPointerCapture(event.pointerId);
-        const rect = this.dom.progressWrapper.querySelector('.progress-bar-bg').getBoundingClientRect();
-        const preview = (cx) => { const r = Math.max(0, Math.min((cx - rect.left) / rect.width, 1)); this.updateProgressBarTime(r * this.totalDuration); return r; };
-        preview(event.clientX);
-        const onMove = (e) => { if (this.draggingProgressBar) preview(e.clientX); };
-        const onUp = (e) => {
-            this.draggingProgressBar = false;
-            this.dom.progressWrapper.releasePointerCapture(event.pointerId);
-            const ratio = preview(e.clientX);
-            void this.seekToTime(ratio * this.totalDuration);
-            this.scheduleAutoHide();
-            window.removeEventListener('pointermove', onMove);
-            window.removeEventListener('pointerup', onUp);
-        };
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
+    _handleBack() {
+        if (this.dom.playerScreen.classList.contains('active')) {
+            this.exitPlayer();
+        }
     }
 
     _triggerSkipIndicator(direction) {
         if (!this.dom.skipIndicator) return;
 
         clearTimeout(this.skipIndicatorTimeout);
-        this.dom.skipIndicator.classList.remove("is-visible", "backward", "forward");
+        this.dom.skipIndicator.classList.remove("is-visible", "skip-indicator--left", "skip-indicator--right");
 
         // Small delay to allow CSS transition to reset if rapidly clicking
         setTimeout(() => {
-            this.dom.skipIndicator.classList.add(direction);
+            const skipClass = direction === "backward" ? "skip-indicator--left" : "skip-indicator--right";
+            this.dom.skipIndicator.classList.add(skipClass);
             this.dom.skipIndicator.innerHTML =
                 direction === "backward"
-                    ? `<span class="icon icon--lg icon-mask icon-mask--back-10" aria-hidden="true"></span>`
-                    : `<span class="icon icon--lg icon-mask icon-mask--fwd-10" aria-hidden="true"></span>`;
+                    ? `<span class="skip-text">&lt;&lt; -10s</span>`
+                    : `<span class="skip-text">+10s &gt;&gt;</span>`;
             this.dom.skipIndicator.classList.add("is-visible");
 
             this.skipIndicatorTimeout = setTimeout(() => {

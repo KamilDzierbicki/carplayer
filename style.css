@@ -156,6 +156,50 @@
 }
 
 @layer components {
+
+  /* ── Web Component base styles (FOUC prevention) ──────── */
+
+  /* Hide unregistered custom elements until JS defines them */
+  carplayer-custom-select:not(:defined),
+  carplayer-clearable-input:not(:defined),
+  carplayer-modal:not(:defined) {
+    opacity: 0;
+  }
+
+  /* Hide <option> children used for declarative config — component removes them on upgrade */
+  carplayer-custom-select>option {
+    display: none;
+  }
+
+  /* Modal: block-level for position:fixed to work (custom elements default to inline)
+     .modal CSS handles visibility via opacity:0 + pointer-events:none */
+  carplayer-modal,
+  carplayer-media-view {
+    display: block;
+  }
+
+  carplayer-media-view {
+    inline-size: 100%;
+    block-size: 100%;
+  }
+
+  /* Modal flow components need flex-column layout */
+  carplayer-add-video-flow,
+  carplayer-link-relay-flow,
+  carplayer-add-captions-flow,
+  carplayer-jellyfin-settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    inline-size: 100%;
+  }
+
+  /* Clearable input needs field-like display */
+  carplayer-clearable-input {
+    display: block;
+    position: relative;
+  }
+
   #setupScreen {
     position: absolute;
     inset: 0;
@@ -814,42 +858,26 @@
     font-size: 0.84rem;
   }
 
-  .modal__content--settings .steps {
+  .modal__content--settings carplayer-step-list {
     margin: 0;
-    padding-block-start: var(--space-6);
-    gap: var(--space-6);
+    --cp-step-list-gap: var(--space-6);
+    --cp-step-list-title-size: 1.03rem;
+    --cp-step-list-title-margin-bottom: var(--space-2);
   }
 
-  .modal__content--settings .step {
-    gap: var(--space-3);
-  }
-
-  .modal__content--settings .step__badge {
-    inline-size: 1.9rem;
-    block-size: 1.9rem;
-  }
-
-  .modal__content--settings .step__title {
-    margin-block-end: var(--space-2);
-    font-size: 1.03rem;
-    letter-spacing: 0.01em;
-  }
-
-  .modal__content--settings .step__desc {
-    max-inline-size: 28rem;
-    font-size: 0.96rem;
-    line-height: 1.62;
-  }
-
-  .modal__content--settings .step__desc--spaced {
-    margin-block-end: var(--space-5);
+  .modal__content--settings carplayer-step-item {
+    --cp-step-gap: var(--space-3);
+    --cp-step-badge-size: 1.9rem;
+    --cp-step-desc-size: 0.96rem;
+    --cp-step-desc-line-height: 1.62;
+    --cp-step-desc-max-inline-size: 28rem;
   }
 
   .modal__content--settings .qr-panel {
     margin-block-start: var(--space-3);
     display: block;
     inline-size: fit-content;
-    margin-inline: 0;
+    margin-inline: auto;
   }
 
   .modal__content--settings .modal__footer {
@@ -1042,54 +1070,6 @@
     transition: inline-size var(--dur-ui) var(--ease-out-expo);
   }
 
-  .steps {
-    margin-block-start: var(--space-7);
-    padding-block-start: var(--space-6);
-    border-block-start: 1px solid var(--color-border);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-5);
-  }
-
-  .step {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-4);
-  }
-
-  .step__badge {
-    flex-shrink: 0;
-    inline-size: 1.75rem;
-    block-size: 1.75rem;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    background: var(--color-track);
-    color: var(--color-ink);
-    font-size: 0.85rem;
-    font-weight: 700;
-  }
-
-  .step__content {
-    flex: 1;
-  }
-
-  .step__title {
-    margin-block-end: var(--space-1);
-    font-size: 0.95rem;
-    font-weight: 600;
-  }
-
-  .step__desc {
-    color: var(--color-muted);
-    font-size: 0.84rem;
-    line-height: 1.5;
-  }
-
-  .step__desc--spaced {
-    margin-block-end: var(--space-4);
-  }
-
   .qr-panel,
   .qr-card {
     display: inline-block;
@@ -1106,9 +1086,7 @@
     margin-block-end: var(--space-5);
   }
 
-  #urlModal .modal__content,
-  #linkRelayModal .modal__content,
-  #captionsModal .modal__content {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .modal__content {
     inline-size: min(100%, 34rem);
     display: flex;
     flex-direction: column;
@@ -1117,22 +1095,16 @@
     padding-inline: clamp(1.15rem, 2.8vw, 2.25rem);
   }
 
-  #urlModal .modal__content>*,
-  #linkRelayModal .modal__content>*,
-  #captionsModal .modal__content>* {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .modal__content>* {
     margin: 0;
   }
 
-  #urlModal .modal__close,
-  #linkRelayModal .modal__close,
-  #captionsModal .modal__close {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .modal__close {
     inset-inline-end: 0.95rem;
     inset-block-start: 0.95rem;
   }
 
-  #urlModal .modal__title,
-  #linkRelayModal .modal__title,
-  #captionsModal .modal__title {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .modal__title {
     margin: 0;
     padding-inline-end: 2.4rem;
     font-size: clamp(1.5rem, 2.4vw, 1.82rem);
@@ -1140,58 +1112,38 @@
     letter-spacing: 0.01em;
   }
 
-  #urlModal .qr-flow,
-  #linkRelayModal .qr-flow,
-  #captionsModal .qr-flow {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .qr-flow {
     margin: 0;
     gap: var(--space-5);
   }
 
-  #urlModal .qr-card,
-  #linkRelayModal .qr-card,
-  #captionsModal .qr-card {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .qr-card {
     padding: 1rem;
     border-radius: calc(var(--radius-md) + 2px);
   }
 
-  #urlModal .step-list,
-  #linkRelayModal .step-list,
-  #captionsModal .step-list {
-    gap: var(--space-3);
+  :is(#urlModal, #linkRelayModal, #captionsModal) carplayer-step-list {
+    --cp-step-list-gap: var(--space-3);
+    --cp-step-list-title-size: 1.07rem;
+    --cp-step-list-title-margin-bottom: var(--space-1);
   }
 
-  #urlModal .step-list__title,
-  #linkRelayModal .step-list__title,
-  #captionsModal .step-list__title {
-    margin: 0 0 var(--space-1);
-    font-size: 1.07rem;
-  }
-
-  #urlModal .step,
-  #linkRelayModal .step,
-  #captionsModal .step {
-    gap: var(--space-3);
-  }
-
-  #urlModal .step__desc,
-  #linkRelayModal .step__desc,
-  #captionsModal .step__desc {
-    font-size: 0.96rem;
-    line-height: 1.58;
+  :is(#urlModal, #linkRelayModal, #captionsModal) carplayer-step-item {
+    --cp-step-gap: var(--space-3);
+    --cp-step-desc-size: 0.96rem;
+    --cp-step-desc-line-height: 1.58;
   }
 
   #urlModal .field--url {
     margin: 0;
   }
 
-  #urlModal .field__input,
-  #captionsModal .field__input {
+  :is(#urlModal, #captionsModal) .field__input {
     min-block-size: 3.15rem;
     border-radius: calc(var(--radius-md) + 2px);
   }
 
-  #urlModal .btn,
-  #captionsModal .btn {
+  :is(#urlModal, #captionsModal) .btn {
     min-block-size: 3.05rem;
     border-radius: calc(var(--radius-md) + 2px);
     letter-spacing: 0.01em;
@@ -1204,27 +1156,6 @@
   .qr-card {
     padding: 1.2rem;
     box-shadow: var(--shadow-soft);
-  }
-
-  .step-list {
-    inline-size: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    container-type: inline-size;
-  }
-
-  .step-list__title {
-    text-align: center;
-    font-size: 0.95rem;
-    font-weight: 650;
-    margin-block-end: var(--space-1);
-  }
-
-  @container (min-width: 26rem) {
-    .step-list .step {
-      align-items: center;
-    }
   }
 
   .modal__footer {
@@ -1286,14 +1217,20 @@
   .caption-overlay {
     position: absolute;
     inset-inline: 0;
-    inset-block-end: clamp(5.25rem, 13svh, 8.75rem);
+    inset-block-end: clamp(7rem, 17svh, 11rem);
     z-index: 45;
     display: flex;
     justify-content: center;
     padding-inline: clamp(0.75rem, 3vw, 2.5rem);
     pointer-events: none;
     opacity: 0;
-    transition: opacity 140ms var(--ease-out-expo);
+    transition:
+      opacity 140ms var(--ease-out-expo),
+      inset-block-end var(--dur-ui) var(--ease-out-expo);
+  }
+
+  .caption-overlay.controls-idle {
+    inset-block-end: max(3.6rem, calc(2.6rem + var(--safe-bottom)));
   }
 
   .caption-overlay.is-visible {
@@ -1303,18 +1240,20 @@
   .caption-overlay__text {
     display: inline-block;
     max-inline-size: min(92vw, 76ch);
-    padding: 0.3rem 0.56rem;
-    border-radius: 0.46rem;
-    background: color-mix(in srgb, black 64%, transparent);
+    padding: 0.4rem 0.8rem;
+    border-radius: 0.5rem;
+    background: transparent;
     color: #fff;
-    font-size: clamp(1rem, 2.3vw, 1.6rem);
-    font-weight: 570;
-    line-height: 1.32;
+    font-size: clamp(1.4rem, 4vw, 2.6rem);
+    font-weight: 600;
+    line-height: 1.4;
     text-align: center;
     white-space: pre-line;
     text-wrap: balance;
-    text-shadow: 0 2px 3px color-mix(in srgb, black 70%, transparent);
-    box-shadow: 0 0.3rem 0.95rem color-mix(in srgb, black 30%, transparent);
+    text-shadow:
+      0 2px 4px rgba(0, 0, 0, 0.9),
+      0 4px 8px rgba(0, 0, 0, 0.7),
+      0 0 10px rgba(0, 0, 0, 0.6);
   }
 
   .player-topbar {
@@ -1327,6 +1266,20 @@
     gap: var(--space-4);
     opacity: 1;
     transition: opacity var(--dur-ui) var(--ease-out-expo);
+  }
+
+  .player-topbar .btn--back {
+    border: 0;
+    background: var(--color-player-glass);
+    backdrop-filter: blur(22px) saturate(120%);
+    -webkit-backdrop-filter: blur(22px) saturate(120%);
+    box-shadow: 0 1rem 2.2rem color-mix(in srgb, black 46%, transparent);
+  }
+
+  @media (any-hover: hover) {
+    .player-topbar .btn--back:hover {
+      background: var(--color-player-glass-strong);
+    }
   }
 
   .player-topbar.idle {
@@ -1350,24 +1303,31 @@
     position: absolute;
     inset-block-start: 50%;
     transform: translateY(-50%) scale(0.95);
-    z-index: 100;
+    z-index: 1000;
     display: flex;
     align-items: center;
+    justify-content: center;
     gap: var(--space-3);
-    padding: 1rem 2.2rem;
+    padding: 1rem 2.5rem;
     border: 0;
-    border-radius: var(--radius-round);
-    background: var(--color-player-glass-strong);
-    backdrop-filter: blur(18px) saturate(118%);
-    -webkit-backdrop-filter: blur(18px) saturate(118%);
-    box-shadow: var(--shadow-soft);
-    font-size: 1.35rem;
-    font-weight: 600;
+    border-radius: var(--radius-xl);
+    background: var(--color-player-glass);
+    backdrop-filter: blur(22px) saturate(120%);
+    -webkit-backdrop-filter: blur(22px) saturate(120%);
+    box-shadow: 0 1rem 2.2rem color-mix(in srgb, black 46%, transparent);
+    color: var(--color-ink);
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     opacity: 0;
     pointer-events: none;
     transition:
       opacity 180ms var(--ease-out-expo),
       transform 180ms var(--ease-out-expo);
+  }
+
+  .skip-text {
+    display: inline-block;
   }
 
   .skip-indicator--left {
@@ -1380,7 +1340,7 @@
     inset-inline-start: auto;
   }
 
-  .skip-indicator.show {
+  .skip-indicator.is-visible {
     opacity: 1;
     transform: translateY(-50%) scale(1);
   }
@@ -1414,6 +1374,7 @@
     backdrop-filter: blur(22px) saturate(120%);
     -webkit-backdrop-filter: blur(22px) saturate(120%);
     box-shadow: 0 1rem 2.2rem color-mix(in srgb, black 46%, transparent);
+    z-index: 60;
     opacity: 1;
     transition:
       opacity var(--dur-ui) var(--ease-out-expo),
@@ -1452,12 +1413,19 @@
     }
   }
 
-  .progress {
+  carplayer-progress-bar {
     grid-area: progress;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+
+  .progress {
     display: flex;
     align-items: center;
     min-block-size: 2.25rem;
     cursor: pointer;
+    width: 100%;
   }
 
   .progress-bar-bg {
@@ -1534,6 +1502,32 @@
     margin-inline-end: 0;
   }
 
+  .player-stream-controls>carplayer-custom-select {
+    flex: 0 1 auto;
+    min-inline-size: 0;
+  }
+
+  .player-stream-controls>carplayer-custom-select .custom-select__trigger {
+    min-inline-size: 0;
+    inline-size: 100%;
+  }
+
+  .player-stream-controls>#qualitySelect {
+    inline-size: clamp(6.8rem, 18vw, 9.5rem);
+  }
+
+  .player-stream-controls>#audioTrackSelect {
+    inline-size: clamp(7.6rem, 22vw, 11rem);
+  }
+
+  .player-stream-controls>#captionSelect {
+    inline-size: clamp(6.8rem, 18vw, 9.5rem);
+  }
+
+  .player-stream-controls>#speedSelect {
+    inline-size: clamp(4.6rem, 10vw, 6rem);
+  }
+
   .custom-select {
     position: relative;
     font-size: 0.9rem;
@@ -1569,6 +1563,16 @@
     white-space: nowrap;
   }
 
+  .custom-select--large .custom-select__trigger {
+    min-block-size: 3rem;
+    padding: 0.9rem 1rem;
+    font-size: 0.95rem;
+  }
+
+  .custom-select--large .custom-select__value {
+    max-inline-size: calc(100% - 2rem);
+  }
+
   .custom-select__trigger:hover {
     background: color-mix(in srgb, var(--color-surface-3) 70%, transparent);
   }
@@ -1591,7 +1595,7 @@
     position: absolute;
     bottom: calc(100% + var(--space-2));
     left: 0;
-    z-index: 100;
+    z-index: 160;
     display: none;
     min-inline-size: 100%;
     max-block-size: 20rem;
@@ -1901,7 +1905,7 @@
   }
 
   .caption-overlay {
-    inset-block-end: max(5rem, calc(4rem + var(--safe-bottom)));
+    inset-block-end: max(6.4rem, calc(5.4rem + var(--safe-bottom)));
     padding-inline: max(var(--space-2), calc(var(--space-2) + var(--safe-left)));
   }
 
@@ -1929,18 +1933,6 @@
     box-shadow: 0 0.45rem 1.45rem color-mix(in srgb, black 42%, transparent);
 
     #playPauseBtn {
-      grid-area: play;
-      position: static;
-      inset: auto;
-      transform: none;
-      inline-size: 3rem;
-      block-size: 3rem;
-      border-radius: 50%;
-      border: 0;
-      background: transparent;
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      box-shadow: none;
       z-index: 60;
     }
 
@@ -1956,26 +1948,56 @@
     }
 
     .progress {
-      grid-area: progress;
       min-block-size: 1.25rem;
     }
 
     .player-stream-controls {
-      grid-area: stream;
-      inline-size: 100%;
       gap: 0.45rem;
     }
 
     .player-tools {
-      grid-area: tools;
       min-inline-size: 4.8rem;
-      inline-size: auto;
-      display: flex;
       align-items: center;
-      justify-content: flex-end;
       gap: 0.35rem;
-      flex-wrap: nowrap;
     }
+  }
+
+  .player-controls #playPauseBtn {
+    grid-area: play;
+    position: static;
+    inset: auto;
+    transform: none;
+    inline-size: 3rem;
+    block-size: 3rem;
+    border-radius: 50%;
+    border: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .player-controls carplayer-progress-bar {
+    grid-area: progress;
+    width: 100%;
+  }
+
+  .player-controls .progress {
+    grid-area: progress;
+    width: 100%;
+  }
+
+  .player-controls .player-stream-controls {
+    grid-area: stream;
+    inline-size: 100%;
+  }
+
+  .player-controls .player-tools {
+    grid-area: tools;
+    inline-size: auto;
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: nowrap;
   }
 
   .player-time {
@@ -2042,51 +2064,37 @@
     line-height: 1.54;
   }
 
-  .modal__content--settings .steps {
-    padding-block-start: var(--space-5);
-    gap: var(--space-5);
+  .modal__content--settings carplayer-step-list {
+    --cp-step-list-gap: var(--space-5);
+    --cp-step-list-title-size: 0.98rem;
   }
 
-  .modal__content--settings .step__title {
-    font-size: 0.98rem;
+  .modal__content--settings carplayer-step-item {
+    --cp-step-desc-size: 0.89rem;
+    --cp-step-desc-line-height: 1.52;
   }
 
-  .modal__content--settings .step__desc {
-    font-size: 0.89rem;
-    line-height: 1.52;
-  }
-
-  #urlModal .modal__content,
-  #linkRelayModal .modal__content,
-  #captionsModal .modal__content {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .modal__content {
     gap: var(--space-4);
     padding: var(--space-4) var(--space-3) calc(var(--space-4) + var(--safe-bottom));
   }
 
-  #urlModal .modal__title,
-  #linkRelayModal .modal__title,
-  #captionsModal .modal__title {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .modal__title {
     font-size: 1.4rem;
     padding-inline-end: 2rem;
   }
 
-  #urlModal .qr-flow,
-  #linkRelayModal .qr-flow,
-  #captionsModal .qr-flow {
+  :is(#urlModal, #linkRelayModal, #captionsModal) .qr-flow {
     gap: var(--space-4);
   }
 
-  #urlModal .step-list__title,
-  #linkRelayModal .step-list__title,
-  #captionsModal .step-list__title {
-    font-size: 1rem;
+  :is(#urlModal, #linkRelayModal, #captionsModal) carplayer-step-list {
+    --cp-step-list-title-size: 1rem;
   }
 
-  #urlModal .step__desc,
-  #linkRelayModal .step__desc,
-  #captionsModal .step__desc {
-    font-size: 0.89rem;
-    line-height: 1.5;
+  :is(#urlModal, #linkRelayModal, #captionsModal) carplayer-step-item {
+    --cp-step-desc-size: 0.89rem;
+    --cp-step-desc-line-height: 1.5;
   }
 
   .player-topbar {
@@ -2214,19 +2222,13 @@
       padding: var(--space-5) var(--space-4) calc(var(--space-5) + var(--safe-bottom));
     }
 
-    #urlModal .modal__content,
-    #captionsModal .modal__content {
+    :is(#urlModal, #captionsModal) .modal__content {
       padding: var(--space-5) var(--space-4) calc(var(--space-5) + var(--safe-bottom));
     }
 
     .player-controls {
       padding: 0.7rem 0.85rem 0.8rem;
       gap: 0.55rem 0.75rem;
-    }
-
-    .player-time {
-      font-size: 0.8rem;
-      min-inline-size: 8.2rem;
     }
 
     .volume-slider {
@@ -2324,63 +2326,8 @@
       padding-inline: clamp(1.15rem, 2.8vw, 2.25rem);
     }
 
-    .modal__content--settings .modal__title {
-      font-size: clamp(1.55rem, 2.4vw, 1.9rem);
-      padding-inline-end: 2.4rem;
-    }
-
-    .modal__content--settings .section-note {
-      font-size: 0.94rem;
-      line-height: 1.58;
-    }
-
-    .modal__content--settings .steps {
-      padding-block-start: var(--space-6);
-      gap: var(--space-6);
-    }
-
-    .modal__content--settings .step__title {
-      font-size: 1.03rem;
-    }
-
-    .modal__content--settings .step__desc {
-      font-size: 0.96rem;
-      line-height: 1.62;
-    }
-
-    #urlModal .modal__content,
-    #linkRelayModal .modal__content,
-    #captionsModal .modal__content {
+    :is(#urlModal, #linkRelayModal, #captionsModal) .modal__content {
       inline-size: min(100%, 42rem);
-      gap: var(--space-4);
-      padding-block: clamp(1.75rem, 2.8vw, 2.25rem);
-      padding-inline: clamp(1.15rem, 2.8vw, 2.25rem);
-    }
-
-    #urlModal .modal__title,
-    #linkRelayModal .modal__title,
-    #captionsModal .modal__title {
-      font-size: clamp(1.5rem, 2.4vw, 1.82rem);
-      padding-inline-end: 2.4rem;
-    }
-
-    #urlModal .qr-flow,
-    #linkRelayModal .qr-flow,
-    #captionsModal .qr-flow {
-      gap: var(--space-5);
-    }
-
-    #urlModal .step-list__title,
-    #linkRelayModal .step-list__title,
-    #captionsModal .step-list__title {
-      font-size: 1.07rem;
-    }
-
-    #urlModal .step__desc,
-    #linkRelayModal .step__desc,
-    #captionsModal .step__desc {
-      font-size: 0.96rem;
-      line-height: 1.58;
     }
 
     .video-grid {
@@ -2404,8 +2351,8 @@
     }
 
     .player-controls {
-      inset-inline-start: max(var(--space-5), calc(var(--space-4) + var(--safe-left)));
-      inset-inline-end: max(var(--space-5), calc(var(--space-4) + var(--safe-right)));
+      inset-inline-start: max(var(--space-3), calc(var(--space-3) + var(--safe-left)));
+      inset-inline-end: max(var(--space-3), calc(var(--space-3) + var(--safe-right)));
       inset-block-end: max(var(--space-4), calc(var(--space-3) + var(--safe-bottom)));
       transform: none;
       inline-size: auto;
@@ -2414,10 +2361,11 @@
       padding: 0.6rem 1rem 0.6rem;
       gap: 0.15rem 0.9rem;
       display: grid;
-      grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto;
+      grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
       grid-template-areas:
-        "progress progress progress progress progress progress progress"
-        "skipBack play skipFwd time . stream tools";
+        "stream stream stream stream stream stream"
+        "progress progress progress progress progress progress"
+        "skipBack play skipFwd time . tools";
       box-shadow: 0 1rem 2.2rem color-mix(in srgb, black 46%, transparent);
     }
 
@@ -2426,18 +2374,6 @@
     }
 
     .player-controls #playPauseBtn {
-      grid-area: play;
-      position: static;
-      inset: auto;
-      transform: none;
-      inline-size: 3rem;
-      block-size: 3rem;
-      border-radius: 50%;
-      border: 0;
-      background: transparent;
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
-      box-shadow: none;
       z-index: auto;
     }
 
@@ -2449,26 +2385,20 @@
     }
 
     .player-controls .progress {
-      grid-area: progress;
       min-block-size: 1.6rem;
     }
 
     .player-controls .player-stream-controls {
-      grid-area: stream;
-      inline-size: 100%;
       display: flex;
       justify-content: flex-end;
-      gap: var(--space-3);
+      flex-wrap: nowrap;
+      min-inline-size: 0;
+      gap: 0.5rem;
     }
 
     .player-controls .player-tools {
-      grid-area: tools;
-      display: flex;
-      inline-size: auto;
-      justify-content: flex-end;
-      flex-wrap: nowrap;
       column-gap: 0;
-      gap: var(--space-4);
+      gap: var(--space-2);
     }
 
     .player-controls .volume-slider {
@@ -2495,8 +2425,13 @@
       font-size: 1.35rem;
     }
 
+    .skip-indicator.is-visible {
+      opacity: 1;
+      transform: translateY(-50%) scale(1);
+    }
+
     .caption-overlay {
-      inset-block-end: max(7.15rem, calc(6rem + var(--safe-bottom)));
+      inset-block-end: max(10.4rem, calc(8.6rem + var(--safe-bottom)));
       padding-inline: max(var(--space-5), calc(var(--space-4) + var(--safe-left)));
     }
   }
@@ -2504,32 +2439,9 @@
   @media (min-width: 1024px) {
     .app-nav {
       grid-template-columns: minmax(10rem, 15rem) minmax(0, 1fr) auto;
-      grid-template-areas: none;
       gap: var(--space-4);
-      padding-block-start: calc(var(--space-4) + var(--safe-top));
-      padding-block-end: var(--space-4);
       padding-inline-start: max(var(--space-6), calc(var(--space-5) + var(--safe-left)));
       padding-inline-end: max(var(--space-6), calc(var(--space-5) + var(--safe-right)));
-    }
-
-    .app-brand {
-      grid-area: auto;
-      justify-self: auto;
-    }
-
-    .search-bar {
-      grid-area: auto;
-      max-inline-size: 36rem;
-      margin-inline: auto;
-    }
-
-    .app-nav__actions {
-      grid-area: auto;
-      inline-size: auto;
-      justify-content: flex-end;
-      justify-self: auto;
-      flex-wrap: nowrap;
-      gap: var(--space-3);
     }
 
     .history-header {
@@ -2540,13 +2452,8 @@
       padding: var(--space-6);
     }
 
-    .player-controls {
-      padding-inline: var(--space-6);
-      gap: 0.1rem var(--space-5);
-    }
-
     .player-controls .player-time {
-      min-inline-size: 7rem;
+      min-inline-size: 6.2rem;
       font-size: 0.92rem;
     }
 
@@ -2608,6 +2515,40 @@
 
     .history-header {
       padding-block-start: var(--space-3);
+    }
+  }
+
+  carplayer-footer {
+    position: fixed;
+    inset-block-end: var(--space-4);
+    inset-inline-start: 50%;
+    transform: translateX(-50%);
+    z-index: var(--z-toast);
+  }
+
+  .floating-footer-link {
+    display: block;
+    background: color-mix(in srgb, var(--color-surface-2) 85%, transparent);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    padding: 0.5rem 1.25rem;
+    border-radius: var(--radius-round);
+    box-shadow: var(--shadow-soft);
+    border: 1px solid var(--color-border);
+    color: var(--color-ink);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    transition:
+      color var(--dur-fast) var(--ease-out-expo),
+      opacity var(--dur-fast) var(--ease-out-expo);
+  }
+
+  @media (any-hover: hover) {
+    .floating-footer-link:hover {
+      color: var(--color-accent);
+      opacity: 0.9;
     }
   }
 }
