@@ -45,8 +45,6 @@ Why not P2P? It avoids LTE/hotspot NAT issues entirely because it is an HTTPS re
 
 Start from project root: `docker compose up -d --build`
 
-Frontend relay base is hardcoded in [`js/share.js`](js/share.js): `https://carplayer.oxyconit.com/api/relay`
-
 ## Screenshots
 
 <img src="demo2.png" alt="CarPlayer screen" width="800">
@@ -71,6 +69,8 @@ Option 1: Go Server (Recommended, required for sharing link via QR code)
 ```bash
 go run main.go
 ```
+
+Option 2: Just open `index.html` in your browser without any server.
 
 *The app will be available at `http://localhost:8080/`. This runs both the static site and the relay backend.*
 

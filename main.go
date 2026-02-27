@@ -387,12 +387,32 @@ func main() {
 	// Try to match exact file, and fallback to index.html for unknown routes if it's SPA
 	// since express app.use(express.static) serves files, and the following app.get('/') and app.use() handle 404s/index
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		path := filepath.Join(absStaticRoot, r.URL.Path)
+		cleanPath := filepath.Clean(r.URL.Path)
+		path := filepath.Join(absStaticRoot, cleanPath)
+
+		// Prevent path traversal to directories outside absStaticRoot
+		if !strings.HasPrefix(path, absStaticRoot) || (len(path) > len(absStaticRoot) && path[len(absStaticRoot)] != filepath.Separator) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":"Forbidden."}`))
+			return
+		}
+
+		// Prevent access to sensitive files
+		baseName := filepath.Base(path)
+		if strings.HasPrefix(baseName, ".") || strings.HasSuffix(baseName, ".go") || strings.HasSuffix(baseName, ".mod") || strings.HasSuffix(baseName, ".md") {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":"Access denied."}`))
+			return
+		}
+
 		fileInfo, err := os.Stat(path)
 
 		if os.IsNotExist(err) || fileInfo.IsDir() {
 			// If asking for root / -> go to index.html
-			if r.URL.Path == "/" {
+			if cleanPath == "/" || cleanPath == "\\" || cleanPath == "." {
+				w.Header().Set("Cache-Control", "no-cache")
 				http.ServeFile(w, r, filepath.Join(absStaticRoot, "index.html"))
 				return
 			}
@@ -401,6 +421,15 @@ func main() {
 			w.Write([]byte(`{"error":"Not found."}`))
 			return
 		}
+
+		// Security and caching headers for static files
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if strings.HasSuffix(path, ".html") {
+			w.Header().Set("Cache-Control", "no-cache")
+		} else {
+			// Cache standard assets for 1 hour
+			w.Header().Set("Cache-Control", "public, max-age=3600")
+		}
 		
 		fs.ServeHTTP(w, r)
 	})
@@ -408,5 +437,13 @@ func main() {
 	fmt.Printf("[relay] listening on :%d\n", port)
 	fmt.Printf("[relay] allowed origins: %s\n", strings.Join(allowedOrigins, ", "))
 
-	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%d", port), mux))
+	srv := &http.Server{
+		Addr:         fmt.Sprintf(":%d", port),
+		Handler:      mux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  30 * time.Second,
+	}
+
+	log.Fatal(srv.ListenAndServe())
 }
