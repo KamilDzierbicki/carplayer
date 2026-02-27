@@ -1804,10 +1804,10 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     justify-content: space-between;
-    gap: var(--space-2) var(--space-3);
+    gap: var(--space-3);
     min-block-size: auto;
     padding-block-start: calc(var(--space-4) + var(--safe-top));
     padding-block-end: var(--space-4);
@@ -1816,19 +1816,15 @@
   }
 
   .app-brand {
-    order: 1;
-    flex: 0 1 auto;
-    justify-self: start;
+    flex-shrink: 0;
     font-size: 1.04rem;
     letter-spacing: 0.02em;
   }
 
   .search-bar {
-    order: 3;
-    flex: 1 1 100%;
-    margin-block-start: var(--space-1);
-    max-inline-size: none;
-    margin-inline: 0;
+    flex: 1;
+    max-inline-size: 36rem;
+    margin-inline: var(--space-3);
     gap: var(--space-1);
     padding: 0.55rem 0.75rem;
     border-radius: 0.75rem;
@@ -1839,11 +1835,10 @@
   }
 
   .app-nav__actions {
-    order: 2;
-    flex: 0 0 auto;
-    inline-size: auto;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
     justify-content: flex-end;
-    justify-self: end;
     flex-wrap: nowrap;
     gap: var(--space-2);
   }
@@ -2271,8 +2266,6 @@
     }
 
     .app-nav {
-      grid-template-columns: minmax(9rem, 13rem) minmax(0, 1fr) auto;
-      grid-template-areas: none;
       gap: var(--space-3);
       padding-block-start: calc(var(--space-4) + var(--safe-top));
       padding-block-end: var(--space-4);
@@ -2280,27 +2273,11 @@
       padding-inline-end: max(var(--space-4), calc(var(--space-3) + var(--safe-right)));
     }
 
-    .app-brand {
-      order: 0;
-      grid-area: auto;
-      justify-self: auto;
-    }
-
     .search-bar {
-      order: 0;
-      grid-area: auto;
-      max-inline-size: 36rem;
       margin-inline: auto;
-      margin-block-start: 0;
     }
 
     .app-nav__actions {
-      order: 0;
-      grid-area: auto;
-      inline-size: auto;
-      justify-content: flex-end;
-      justify-self: auto;
-      flex-wrap: nowrap;
       gap: var(--space-3);
     }
 
@@ -2438,7 +2415,6 @@
 
   @media (min-width: 1024px) {
     .app-nav {
-      grid-template-columns: minmax(10rem, 15rem) minmax(0, 1fr) auto;
       gap: var(--space-4);
       padding-inline-start: max(var(--space-6), calc(var(--space-5) + var(--safe-left)));
       padding-inline-end: max(var(--space-6), calc(var(--space-5) + var(--safe-right)));
@@ -2482,10 +2458,9 @@
     .app-nav {
       position: relative;
       display: flex;
-      flex-wrap: wrap;
+      flex-wrap: nowrap;
       align-items: center;
-      row-gap: var(--space-2);
-      column-gap: var(--space-2);
+      gap: var(--space-2);
       min-block-size: auto;
       padding-block-start: max(var(--space-2), calc(var(--space-2) + var(--safe-top)));
       padding-block-end: var(--space-2);
@@ -2494,23 +2469,15 @@
     }
 
     .app-brand {
-      order: 1;
-      flex: 0 1 auto;
-      min-inline-size: 0;
+      flex-shrink: 0;
     }
 
     .app-nav__actions {
-      order: 2;
-      margin-inline-start: auto;
-      flex: 0 0 auto;
       gap: var(--space-2);
     }
 
     .search-bar {
-      order: 3;
-      flex: 1 0 100%;
-      max-inline-size: none;
-      margin-inline: 0;
+      margin-inline: var(--space-2);
     }
 
     .history-header {
