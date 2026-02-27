@@ -64,15 +64,16 @@ cd carplayer
 
 ### Run locally
 
-Option 1: Go Server (Recommended, required for sharing link via QR code)
+### Option 1: Go Server (Recommended, required for sharing link via QR code) - 
 
-```bash
+```
 go run main.go
 ```
-
-Option 2: Just open `index.html` in your browser without any server.
-
 *The app will be available at `http://localhost:8080/`. This runs both the static site and the relay backend.*
+
+### Option 2: Easy and fast
+
+Just open `index.html` in your browser without any server.
 
 ## Contributing
 
