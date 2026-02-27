@@ -1,4 +1,4 @@
-const RELAY_API_BASE = "https://carplayer.oxyconit.com/api/relay";
+const RELAY_API_BASE = `${window.location.origin}/api/relay`;
 
 export default class ShareController {
   #app;
@@ -43,12 +43,6 @@ export default class ShareController {
   async #handleDomReady() {
     this.#bindShareButtons();
     this.#handleInitialParams();
-
-    if (!this.#isShareMode()) {
-      await this.#ensureRelaySessionReady();
-    }
-
-    this.#refreshRelayQrs();
   }
 
   #bindShareButtons() {
@@ -56,9 +50,46 @@ export default class ShareController {
     if (appNav) {
       appNav.addEventListener("action-send-link", () => {
         this.#app.openModal("linkRelayModal");
-        this.#refreshRelayQrs();
       });
     }
+
+    document.addEventListener("modal-open", (e) => {
+      const modalId = e.target?.id;
+      if (!modalId) return;
+
+      if (modalId === "linkRelayModal") {
+        void this.#renderRelayQr({
+          containerId: "linkRelayQrcode",
+          mode: "linkshare",
+          width: 250,
+          height: 250,
+        });
+      } else if (modalId === "urlModal") {
+        void this.#renderRelayQr({
+          containerId: "qrcode",
+          mode: "share",
+          width: 250,
+          height: 250,
+          flowContext: "carplayer-add-video-flow",
+        });
+      } else if (modalId === "settingsModal") {
+        void this.#renderRelayQr({
+          containerId: "settingsMobileQrcode",
+          mode: "settings",
+          width: 240,
+          height: 240,
+          flowContext: "carplayer-jellyfin-settings-form",
+        });
+      } else if (modalId === "captionsModal") {
+        void this.#renderRelayQr({
+          containerId: "captionsRelayQrcode",
+          mode: "captionshare",
+          width: 250,
+          height: 250,
+          flowContext: "carplayer-add-captions-flow",
+        });
+      }
+    });
 
     const captionsFlow = document.querySelector("carplayer-add-captions-flow");
     const btnLoadCaptionUrl = captionsFlow ? captionsFlow.querySelector("#btnLoadCaptionUrl") : null;
@@ -293,41 +324,9 @@ export default class ShareController {
     }
   }
 
-  #refreshRelayQrs() {
-    this.#renderRelayQr({
-      containerId: "qrcode",
-      mode: "share",
-      width: 250,
-      height: 250,
-      flowContext: "carplayer-add-video-flow",
-    });
+  // #refreshRelayQrs() is removed, we do just-in-time rendering.
 
-    this.#renderRelayQr({
-      containerId: "settingsMobileQrcode",
-      mode: "settings",
-      width: 240,
-      height: 240,
-      flowContext: "carplayer-jellyfin-settings-form",
-    });
-
-    this.#renderRelayQr({
-      containerId: "linkRelayQrcode",
-      mode: "linkshare",
-      width: 250,
-      height: 250,
-      flowContext: "carplayer-link-relay-flow",
-    });
-
-    this.#renderRelayQr({
-      containerId: "captionsRelayQrcode",
-      mode: "captionshare",
-      width: 250,
-      height: 250,
-      flowContext: "carplayer-add-captions-flow",
-    });
-  }
-
-  #renderRelayQr({ containerId, mode, width, height, flowContext }) {
+  async #renderRelayQr({ containerId, mode, width, height, flowContext }) {
     let qrContainer = null;
     if (flowContext) {
       const flow = document.querySelector(flowContext);
@@ -337,18 +336,21 @@ export default class ShareController {
 
     if (!qrContainer) return;
 
-    const relayUrl = this.#buildRelayUrl(mode);
-
-    qrContainer.innerHTML = "";
-
-    if (!relayUrl) {
+    if (!this.#isShareMode()) {
       qrContainer.innerHTML =
         '<div class="loader loader-inline is-visible" aria-hidden="true"></div><div class="loader-text">Preparing secure relay...</div>';
-      if (!this.#isShareMode()) {
-        void this.#ensureRelaySessionReady();
+
+      const session = await this.#ensureRelaySessionReady();
+      if (!session) {
+        qrContainer.innerHTML = '<div class="error-text">Failed to connect to relay server.</div>';
+        return;
       }
-      return;
     }
+
+    const relayUrl = this.#buildRelayUrl(mode);
+    qrContainer.innerHTML = "";
+
+    if (!relayUrl) return;
 
     new QRCode(qrContainer, {
       text: relayUrl,
@@ -429,14 +431,11 @@ export default class ShareController {
         this.#relaySession = session;
         this.#lastRelayFailureReason = "";
         this.#startRelayPolling();
-        this.#refreshRelayQrs();
-
         console.log(`[relay] Session ready. sid=${session.sessionId}, expiresAt=${session.expiresAt}`);
         return session;
       } catch (error) {
         this.#lastRelayFailureReason = this.#describeRelayError(error, "Unable to create relay session.");
         console.error("[relay] Session create failed", error);
-        this.#refreshRelayQrs();
         return null;
       } finally {
         this.#relaySessionPromise = null;

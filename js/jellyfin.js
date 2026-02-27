@@ -114,7 +114,6 @@ export default class JellyfinService {
         const apiKey = this.#storage.getJellyfinApiKey();
 
         if (!serverUrl || !apiKey) {
-            alert("Please configure Jellyfin settings before searching.");
             this.#settingsController?.openModal();
             return;
         }

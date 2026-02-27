@@ -48,6 +48,7 @@ export default class CarplayerModal extends HTMLElement {
 
     open() {
         this.classList.add('active');
+        this.dispatchEvent(new CustomEvent('modal-open', { bubbles: true }));
     }
 
     close() {
