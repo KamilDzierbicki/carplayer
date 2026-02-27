@@ -334,9 +334,6 @@ export default class ShareController {
   // #refreshRelayQrs() is removed, we do just-in-time rendering.
 
   async #resumeRelayPollingOrRender(config) {
-    if (this.#isRelaySessionUsable(this.#relaySession) && !this.#relayPollTimer) {
-      this.#startRelayPolling();
-    }
     return this.#renderRelayQr(config);
   }
 
@@ -359,6 +356,8 @@ export default class ShareController {
         qrContainer.innerHTML = '<div class="error-text">Failed to connect to relay server.</div>';
         return;
       }
+
+      this.#startRelayPolling();
     }
 
     const relayUrl = this.#buildRelayUrl(mode);
@@ -444,7 +443,6 @@ export default class ShareController {
         const session = await this.#createRelaySession();
         this.#relaySession = session;
         this.#lastRelayFailureReason = "";
-        this.#startRelayPolling();
         console.log(`[relay] Session ready. sid=${session.sessionId}, expiresAt=${session.expiresAt}`);
         return session;
       } catch (error) {
@@ -514,11 +512,15 @@ export default class ShareController {
     this.#stopRelayPolling();
 
     const poll = async () => {
-      if (!this.#relaySession) return;
+      if (!this.#relaySession) {
+        this.#stopRelayPolling();
+        return;
+      }
 
       if (!this.#isRelaySessionUsable(this.#relaySession)) {
-        console.warn("[relay] Session is near expiration; rotating session.");
-        await this.#ensureRelaySessionReady(true);
+        console.warn("[relay] Session is near expiration. Polling paused until re-requested.");
+        this.#stopRelayPolling();
+        return;
       } else {
         await this.#pollRelayMessages(this.#relaySession);
       }
@@ -551,8 +553,8 @@ export default class ShareController {
     }
 
     if (response.status === 404 || response.status === 410) {
-      console.warn(`[relay] Session invalid (${response.status}); creating a new session.`);
-      await this.#ensureRelaySessionReady(true);
+      console.warn(`[relay] Session invalid (${response.status}); stopping polling.`);
+      this.#stopRelayPolling();
       return;
     }
 
