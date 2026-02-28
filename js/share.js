@@ -96,9 +96,11 @@ export default class ShareController {
           const apiKey = this.#storage.getJellyfinApiKey();
           if (serverUrl) {
             mobileServerInput.value = serverUrl;
+            mobileServerInput.setAttribute("value", serverUrl);
           }
           if (apiKey) {
             mobileApiInput.value = apiKey;
+            mobileApiInput.setAttribute("value", apiKey);
           }
         }
       }

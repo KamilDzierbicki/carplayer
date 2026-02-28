@@ -58,19 +58,23 @@ export default class CarPlayerCore {
 
   openModal(id) {
     const modal = document.getElementById(id);
-    if (modal && typeof modal.open === 'function') {
+    if (!modal) return;
+    if (typeof modal.open === 'function') {
       modal.open();
-    } else if (modal) {
+    } else {
       modal.classList.add("active");
+      modal.dispatchEvent(new CustomEvent('modal-open', { bubbles: true }));
     }
   }
 
   closeModal(id) {
     const modal = document.getElementById(id);
-    if (modal && typeof modal.close === 'function') {
+    if (!modal) return;
+    if (typeof modal.close === 'function') {
       modal.close();
-    } else if (modal) {
+    } else {
       modal.classList.remove("active");
+      modal.dispatchEvent(new CustomEvent('modal-close', { bubbles: true }));
     }
   }
 
