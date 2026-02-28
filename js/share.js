@@ -88,6 +88,19 @@ export default class ShareController {
           height: 250,
           flowContext: "carplayer-add-captions-flow",
         });
+      } else if (modalId === "mobileApiModal") {
+        const mobileServerInput = document.getElementById("mobileJellyfinServerInput");
+        const mobileApiInput = document.getElementById("mobileJellyfinApiKeyInput");
+        if (mobileServerInput && mobileApiInput) {
+          const serverUrl = this.#storage.getJellyfinServerUrl();
+          const apiKey = this.#storage.getJellyfinApiKey();
+          if (serverUrl) {
+            mobileServerInput.value = serverUrl;
+          }
+          if (apiKey) {
+            mobileApiInput.value = apiKey;
+          }
+        }
       }
     });
 
@@ -171,6 +184,11 @@ export default class ShareController {
         });
 
         if (!sent) return;
+
+        this.#storage.saveJellyfinConfig({
+          serverUrl,
+          apiKey,
+        });
 
         mobileServerInput.value = "";
         mobileApiInput.value = "";

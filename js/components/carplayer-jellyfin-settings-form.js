@@ -32,7 +32,7 @@ export default class CarplayerJellyfinSettingsForm extends HTMLElement {
                   Codec</label>
                 <carplayer-custom-select id="jellyfinVideoCodec" title="Video Codec" value="h264" class="custom-select--large">
                   <option value="h264" selected>H.264 (Default/Safest)</option>
-                  <option value="h265">H.265 (HEVC)</option>
+                  <option value="h265">H.265 HEVC (save network data)</option>
                   <option value="av1">AV1</option>
                 </carplayer-custom-select>
               </div>
