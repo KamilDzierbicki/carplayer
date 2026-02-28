@@ -578,10 +578,18 @@ class AudioManager {
         return collectDeduped(tracks);
     }
 
-    async createContext(sampleRate) {
-        if (this.context) await this.context.close();
+    unlockContext() {
+        if (this.context) {
+            if (this.context.state === 'suspended') {
+                this.context.resume().catch(() => { });
+            }
+            return;
+        }
         const AC = window.AudioContext || window.webkitAudioContext;
-        this.context = new AC({ sampleRate });
+        this.context = new AC();
+        if (this.context.state === 'suspended') {
+            this.context.resume().catch(() => { });
+        }
         this.gainNode = this.context.createGain();
         this.gainNode.connect(this.context.destination);
         this.updateVolumeState();
@@ -927,6 +935,9 @@ export default class PlayerController {
         if (!adapter) return;
         this.currentUrl = options.url || '';
 
+        // Safely unlock AudioContext synchronously using the current user gesture - iOS fix
+        this.audio.unlockContext();
+
         if (this.topBar) {
             this.topBar.setAttribute("video-title", options.title || '');
         }
@@ -951,7 +962,7 @@ export default class PlayerController {
             await this.audio.stopIterator();
             this.videoFrameIterator = null;
             this.nextFrame = null;
-            if (this.audio.context) { await this.audio.context.close(); this.audio.context = null; }
+            // AudioContext is no longer closed here; we reuse the unlocked one
             this.fileLoaded = false;
 
             this.showControls();
@@ -980,7 +991,7 @@ export default class PlayerController {
             if (!audioTrack) audioTrack = audioTracks[0] || null;
             if (!videoTrack && !audioTrack) throw new Error('No supported audio/video tracks found.');
 
-            await this.audio.createContext(audioTrack?.sampleRate);
+            // AudioContext is already unlocked and reused
             await this._setupVideoSink(videoTrack);
             this.canvas.style.display = videoTrack ? 'block' : 'none';
 
