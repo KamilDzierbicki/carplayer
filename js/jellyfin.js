@@ -239,6 +239,7 @@ export class Jellyfin {
             VideoBitrate: videoBitrate,
             AudioBitrate: audioBitrate,
             MaxStreamingBitrate: videoBitrate + audioBitrate,
+            AudioChannels: 2, // force to 2.0 for slower cpu in car
             TranscodeReasons: 'VideoCodecNotSupported,AudioCodecNotSupported,ContainerNotSupported',
             SegmentContainer: 'ts',
             MinSegments: 1,
