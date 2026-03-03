@@ -66,7 +66,7 @@ cd carplayer
 
 ### Option 1: Go Server (Recommended, required for sharing link via QR code) - 
 
-```
+```bash
 go run main.go
 ```
 *The app will be available at `http://localhost:8080/`. This runs both the static site and the relay backend.*
@@ -74,6 +74,11 @@ go run main.go
 ### Option 2: Easy and fast
 
 Just open `index.html` in your browser without any server.
+
+## Limitations
+
+- CORS must be enabled on media hosts (`Access-Control-Allow-Origin`).
+- Browser must support WebCodecs + MediaSource for full functionality
 
 ## Contributing
 
