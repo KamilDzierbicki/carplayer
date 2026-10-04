@@ -5,7 +5,7 @@ export default class CarplayerNavbar extends HTMLElement {
             <div class="app-nav">
                 <a href="#" id="logoLink" class="app-brand" onclick="window.location.reload(); return false;">
                     <img class="icon icon--md" src="icons/favicon.svg" alt="CarPlayer Logo" />
-                    CarPlayer
+                    <span class="app-brand__label">CarPlayer</span>
                 </a>
 
                 <div class="search-bar">
@@ -19,22 +19,22 @@ export default class CarplayerNavbar extends HTMLElement {
                 </div>
 
                 <div class="app-nav__actions">
-                    <button class="btn btn--dark" id="btnOpenUrlModal">
+                    <button class="btn btn--dark app-nav__btn" id="btnOpenUrlModal" type="button" title="Add Video" aria-label="Add Video">
                         <span class="icon icon--sm icon-mask icon-mask--plus" aria-hidden="true"></span>
-                        Add Video
+                        <span class="app-nav__label">Add Video</span>
                     </button>
 
-                    <button class="btn btn--dark" id="btnOpenLinkRelayModal">
+                    <button class="btn btn--dark app-nav__btn app-nav__btn--secondary" id="btnOpenLinkRelayModal" type="button" title="Send Link to Car" aria-label="Send Link to Car">
                         <span class="icon icon--sm icon-mask icon-mask--share" aria-hidden="true"></span>
-                        Send Link
+                        <span class="app-nav__label">Send Link</span>
                     </button>
 
-                    <button class="btn btn--dark" id="btnFullscreenTesla" type="button">
+                    <button class="btn btn--dark app-nav__btn app-nav__btn--secondary" id="btnFullscreenTesla" type="button" title="Fullscreen (Tesla)" aria-label="Fullscreen (Tesla)">
                         <span class="icon icon--sm icon-mask icon-mask--fullscreen" aria-hidden="true"></span>
-                        Fullscreen (Tesla)
+                        <span class="app-nav__label">Fullscreen (Tesla)</span>
                     </button>
 
-                    <button class="icon-btn" id="btnOpenSettings" title="Settings" type="button">
+                    <button class="icon-btn app-nav__settings" id="btnOpenSettings" title="Settings" aria-label="Settings" type="button">
                         <span class="icon icon--md icon-mask icon-mask--settings" aria-hidden="true"></span>
                     </button>
                 </div>

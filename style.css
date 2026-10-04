@@ -382,7 +382,7 @@
     gap: var(--space-3);
   }
 
-  @media (max-width: 767px) {
+  @media (max-width: 767px) and (orientation: portrait) {
     #btnFullscreenTesla {
       display: none;
     }
@@ -1502,8 +1502,9 @@
     margin-inline-end: 0;
   }
 
+  /* Selectors size to their label and wrap to a new line instead of truncating */
   .player-stream-controls>carplayer-custom-select {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     min-inline-size: 0;
   }
 
@@ -1512,20 +1513,8 @@
     inline-size: 100%;
   }
 
-  .player-stream-controls>#qualitySelect {
-    inline-size: clamp(6.8rem, 18vw, 9.5rem);
-  }
-
-  .player-stream-controls>#audioTrackSelect {
-    inline-size: clamp(7.6rem, 22vw, 11rem);
-  }
-
-  .player-stream-controls>#captionSelect {
-    inline-size: clamp(6.8rem, 18vw, 9.5rem);
-  }
-
   .player-stream-controls>#speedSelect {
-    inline-size: clamp(4.6rem, 10vw, 6rem);
+    flex-grow: 0;
   }
 
   .custom-select {
@@ -1598,7 +1587,8 @@
     z-index: 160;
     display: none;
     min-inline-size: 100%;
-    max-block-size: 20rem;
+    max-block-size: min(20rem, calc(100svh - 11rem));
+    max-block-size: min(20rem, calc(100dvh - 11rem));
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
@@ -1872,8 +1862,9 @@
   }
 
   .video-grid {
-    grid-template-columns: 1fr;
-    padding: var(--space-4) var(--space-3) var(--space-5);
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 15rem), 1fr));
+    padding: var(--space-4) var(--space-3) var(--space-7);
+    padding-block-end: calc(var(--space-7) + 2.5rem + var(--safe-bottom));
     gap: var(--space-4);
   }
 
@@ -2201,7 +2192,8 @@
     }
 
     .video-grid {
-      padding: var(--space-6) var(--space-4);
+      padding-block-start: var(--space-6);
+      padding-inline: var(--space-4);
       gap: var(--space-6);
     }
 
@@ -2263,22 +2255,6 @@
       block-size: 100%;
       max-inline-size: none;
       max-block-size: none;
-    }
-
-    .app-nav {
-      flex-wrap: nowrap;
-      gap: var(--space-3);
-      padding-block-start: calc(var(--space-4) + var(--safe-top));
-      padding-block-end: var(--space-4);
-      padding-inline-start: max(var(--space-4), calc(var(--space-3) + var(--safe-left)));
-      padding-inline-end: max(var(--space-4), calc(var(--space-3) + var(--safe-right)));
-    }
-
-    .search-bar {
-      order: 0;
-      flex: 1;
-      max-inline-size: 36rem;
-      margin-inline: auto;
     }
 
     .app-nav__actions {
@@ -2372,9 +2348,13 @@
     .player-controls .player-stream-controls {
       display: flex;
       justify-content: flex-end;
-      flex-wrap: nowrap;
+      flex-wrap: wrap;
       min-inline-size: 0;
       gap: 0.5rem;
+    }
+
+    .player-stream-controls>carplayer-custom-select {
+      flex: 0 1 auto;
     }
 
     .player-controls .player-tools {
@@ -2429,7 +2409,8 @@
     }
 
     .video-grid {
-      padding: var(--space-6);
+      padding-block-start: var(--space-6);
+      padding-inline: var(--space-6);
     }
 
     .player-controls .player-time {
@@ -2458,36 +2439,288 @@
     }
   }
 
-  @media (orientation: landscape) and (max-height: 560px) and (hover: none) and (pointer: coarse) {
+  /* ── Navigation: icon-only buttons where labels do not fit ── */
+  .app-nav .app-nav__btn {
+    min-inline-size: 2.75rem;
+  }
+
+  .app-nav .app-nav__settings {
+    inline-size: 2.75rem;
+    min-block-size: 2.75rem;
+    padding-inline: 0;
+  }
+
+  .search-bar {
+    min-inline-size: 0;
+  }
+
+  @media (max-width: 479px) {
+    .app-nav .app-nav__btn {
+      padding-inline: 0;
+    }
+
+    .app-nav .app-nav__btn .app-nav__label {
+      display: none;
+    }
+  }
+
+  @media (max-width: 1199px) {
+    .app-nav .app-nav__btn--secondary {
+      padding-inline: 0;
+    }
+
+    .app-nav .app-nav__btn--secondary .app-nav__label {
+      display: none;
+    }
+  }
+
+  /* One nav row from 600px: brand, search, actions (zoomed in-car browsers land here) */
+  @media (min-width: 600px) {
+    .app-nav {
+      flex-wrap: nowrap;
+    }
+
+    .search-bar {
+      order: 0;
+      flex: 1 1 auto;
+      max-inline-size: 36rem;
+      margin-inline: auto;
+    }
+  }
+
+  @media (min-width: 600px) and (max-width: 719px) {
+    .app-brand__label {
+      display: none;
+    }
+  }
+
+  /* ── Touch: bigger tile actions on touch screens and short car displays ── */
+  @media (pointer: coarse), (max-height: 600px) {
+
+    .tile-action-btn,
+    .tile-share-btn-bottom {
+      inline-size: 2.5rem;
+      block-size: 2.5rem;
+    }
+  }
+
+  /* ── Narrow phones: keep play/time/mute on one line without overlap ── */
+  @media (max-width: 419px) {
+    .player-controls .icon-btn--control:not(.icon-btn--small) {
+      inline-size: 2.75rem;
+      block-size: 2.75rem;
+    }
+
+    .player-controls .player-time {
+      min-inline-size: 0;
+    }
+
+    .player-controls .player-tools {
+      min-inline-size: 0;
+    }
+
+    /* Phones use hardware volume keys (iOS ignores element volume); mute stays */
+    .player-controls .volume-slider {
+      display: none;
+    }
+  }
+
+  /* Stream selectors: tighter triggers so 3-4 of them fit one row on narrow screens */
+  @media (max-width: 999px) {
+    .player-stream-controls .custom-select__trigger {
+      padding-inline: 0.65rem;
+      gap: 0.4rem;
+    }
+  }
+
+  /* Phones with 3-4 selectors (Jellyfin): tidy 2x2 grid instead of one full-width row each */
+  @media (max-width: 599px) {
+    .player-controls:has(.player-stream-controls > carplayer-custom-select:not(.hidden) ~ carplayer-custom-select:not(.hidden) ~ carplayer-custom-select:not(.hidden)) .player-stream-controls {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* ── Short landscape: zoomed in-car browser, phone landscape ── */
+  @media (orientation: landscape) and (max-height: 600px) {
     .app-nav {
       position: relative;
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: var(--space-2);
       min-block-size: auto;
-      padding-block-start: max(var(--space-2), calc(var(--space-2) + var(--safe-top)));
+      padding-block-start: max(var(--space-2), calc(var(--space-1) + var(--safe-top)));
       padding-block-end: var(--space-2);
       backdrop-filter: none;
       -webkit-backdrop-filter: none;
     }
 
-    .app-brand {
-      flex-shrink: 0;
-    }
-
-    .app-nav__actions {
-      gap: var(--space-2);
-    }
-
-    .search-bar {
-      order: 3;
-      flex: 1 1 100%;
-      margin-inline: 0;
-    }
-
     .history-header {
       padding-block-start: var(--space-3);
+    }
+
+    .video-grid {
+      padding-block-start: var(--space-3);
+      gap: var(--space-4);
+    }
+
+    .floating-footer-link {
+      padding: 0.35rem 1rem;
+      font-size: 0.8rem;
+    }
+
+    carplayer-footer {
+      inset-block-end: max(var(--space-2), var(--safe-bottom));
+    }
+
+    /* Modals: centered card using nearly the full height */
+    .modal {
+      align-items: center;
+      padding-block-start: max(var(--space-2), calc(var(--space-1) + var(--safe-top)));
+      padding-block-end: max(var(--space-2), calc(var(--space-1) + var(--safe-bottom)));
+    }
+
+    .modal__content {
+      border-radius: var(--radius-lg);
+      max-block-size: min(100%, calc(100svh - (var(--space-2) * 2)));
+      max-block-size: min(100%, calc(100dvh - (var(--space-2) * 2)));
+      padding: var(--space-4) var(--space-5);
+    }
+
+    .modal__content--settings,
+    :is(#urlModal, #linkRelayModal, #captionsModal) .modal__content {
+      gap: var(--space-3);
+      padding: var(--space-4) var(--space-5);
+    }
+
+    .modal__title,
+    .modal__content--settings .modal__title,
+    :is(#urlModal, #linkRelayModal, #captionsModal) .modal__title {
+      font-size: 1.3rem;
+    }
+
+    .modal__close,
+    .modal__content--settings .modal__close,
+    :is(#urlModal, #linkRelayModal, #captionsModal) .modal__close {
+      inset-block-start: 0.6rem;
+      inset-inline-end: 0.75rem;
+    }
+
+    .section-note {
+      margin-block-end: var(--space-3);
+    }
+
+    .modal__content--settings carplayer-step-list {
+      --cp-step-list-gap: var(--space-3);
+    }
+
+    .modal__content--settings .modal__footer {
+      margin-block-start: var(--space-3);
+      padding-block-start: var(--space-3);
+    }
+
+    /* QR beside its steps instead of above them */
+    .qr-flow,
+    :is(#urlModal, #linkRelayModal, #captionsModal) .qr-flow {
+      flex-direction: row;
+      align-items: center;
+      gap: var(--space-4);
+    }
+
+    .qr-card,
+    :is(#urlModal, #linkRelayModal, #captionsModal) .qr-card {
+      flex-shrink: 0;
+      padding: 0.6rem;
+    }
+
+    .qr-card :is(img, canvas),
+    .qr-panel :is(img, canvas) {
+      inline-size: min(10rem, 38svh);
+      block-size: auto;
+    }
+
+    :is(#urlModal, #linkRelayModal, #captionsModal) carplayer-step-list {
+      --cp-step-list-gap: var(--space-2);
+    }
+
+    /* Player: tighter chrome so the video keeps most of the height */
+    .player-topbar {
+      inset-block-start: max(var(--space-2), calc(var(--space-1) + var(--safe-top)));
+      inset-inline-start: max(var(--space-3), calc(var(--space-2) + var(--safe-left)));
+      inset-inline-end: max(var(--space-3), calc(var(--space-2) + var(--safe-right)));
+    }
+
+    .player-topbar .btn--back {
+      min-block-size: 2.5rem;
+    }
+
+    .player-controls {
+      inset-block-end: max(var(--space-2), calc(var(--space-1) + var(--safe-bottom)));
+      padding: 0.35rem 0.85rem 0.4rem;
+      row-gap: 0.1rem;
+    }
+
+    .player-controls .progress {
+      min-block-size: 1.4rem;
+    }
+
+    .caption-overlay {
+      inset-block-end: max(7.5rem, calc(6.5rem + var(--safe-bottom)));
+    }
+  }
+
+  /* Wide enough short screens: selectors join the button row (two rows instead of three) */
+  @media (orientation: landscape) and (max-height: 600px) and (min-width: 700px) {
+    .player-controls {
+      grid-template-columns: auto auto auto auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        "progress progress progress progress progress progress"
+        "skipBack play skipFwd time stream tools";
+    }
+
+    .player-controls .player-stream-controls {
+      flex-wrap: nowrap;
+    }
+
+    .player-controls .volume-slider {
+      inline-size: 4rem;
+    }
+  }
+
+  /* Jellyfin streams show 3-4 selectors; below 1200px they need their own row to stay readable */
+  @media (orientation: landscape) and (max-height: 600px) and (min-width: 700px) and (max-width: 1199px) {
+    .player-controls:has(.player-stream-controls > carplayer-custom-select:not(.hidden) ~ carplayer-custom-select:not(.hidden) ~ carplayer-custom-select:not(.hidden)) {
+      grid-template-areas:
+        "stream stream stream stream stream stream"
+        "progress progress progress progress progress progress"
+        "skipBack play skipFwd time . tools";
+    }
+
+    .player-controls:has(.player-stream-controls > carplayer-custom-select:not(.hidden) ~ carplayer-custom-select:not(.hidden) ~ carplayer-custom-select:not(.hidden)) .player-stream-controls {
+      flex-wrap: wrap;
+    }
+  }
+
+  /* Add Video on short screens: QR on the left, steps and manual link on the right */
+  @media (orientation: landscape) and (max-height: 600px) and (min-width: 640px) {
+    carplayer-add-video-flow {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      column-gap: var(--space-5);
+      row-gap: var(--space-3);
+      align-items: start;
+    }
+
+    carplayer-add-video-flow .qr-flow {
+      display: contents;
+    }
+
+    carplayer-add-video-flow .qr-card {
+      grid-column: 1;
+      grid-row: 1 / span 4;
+      align-self: center;
+    }
+
+    carplayer-add-video-flow>:not(.qr-flow),
+    carplayer-add-video-flow carplayer-step-list {
+      grid-column: 2;
     }
   }
 
