@@ -25,8 +25,9 @@ export default class CarplayerVideoControls extends HTMLElement {
                 </button>
 
                 <div class="player-time">
-                    <span id="currentTimeDisplay">00:00</span> /
-                    <output id="durationDisplay">00:00</output>
+                    <span class="player-time__clock"><span id="currentTimeDisplay">00:00</span> /
+                    <output id="durationDisplay">00:00</output></span>
+                    <span class="live-badge">LIVE</span>
                 </div>
 
                 <carplayer-progress-bar id="progressBarWrapper" style="display: flex; flex: 1; align-items: center;"></carplayer-progress-bar>

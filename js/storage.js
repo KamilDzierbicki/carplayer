@@ -175,7 +175,7 @@ export default class StorageService {
     return { time: item.position || 0, duration: item.duration || 0 };
   }
 
-  addHistory(url, title = "") {
+  addHistory(url, title = "", extras = {}) {
     if (!url) return;
 
     const id = this.extractId(url);
@@ -185,18 +185,20 @@ export default class StorageService {
     let item = {
       id,
       title,
-      sourceType: this.#getSourceTypeFromId(id),
+      sourceType: extras.sourceType || this.#getSourceTypeFromId(id),
       position: 0,
       duration: 0,
     };
     if (existingIdx !== -1) {
       item = history[existingIdx];
       if (title) item.title = title;
+      if (extras.sourceType) item.sourceType = extras.sourceType;
       if (!item.sourceType) {
         item.sourceType = this.#getSourceTypeFromId(id);
       }
       history.splice(existingIdx, 1);
     }
+    if (extras.thumbnailUrl) item.thumbnailUrl = String(extras.thumbnailUrl);
 
     history.unshift(item);
     if (history.length > 20) history.pop();
@@ -314,6 +316,113 @@ export default class StorageService {
 
   renderHistory(filterQuery = "") {
     this.#historyRenderer?.render(filterQuery);
+  }
+
+  getActiveTab() {
+    return localStorage.getItem("carplayer_active_tab") || "dashboard";
+  }
+
+  saveActiveTab(tabId) {
+    localStorage.setItem("carplayer_active_tab", String(tabId || ""));
+  }
+
+  getWidgetLayout() {
+    return this.#readJson("carplayer_widgets", null);
+  }
+
+  saveWidgetLayout(layout) {
+    this.#writeJson("carplayer_widgets", layout);
+  }
+
+  getTodos() {
+    return this.#readJson("carplayer_todos", []);
+  }
+
+  saveTodos(todos) {
+    this.#writeJson("carplayer_todos", todos);
+  }
+
+  getWeatherLocation() {
+    return this.#readJson("carplayer_weather_location", null);
+  }
+
+  saveWeatherLocation(location) {
+    this.#writeJson("carplayer_weather_location", location);
+  }
+
+  getYoutubeConfig() {
+    return {
+      proxyUrl: "",
+      ...this.#readJson("carplayer_youtube", {}),
+    };
+  }
+
+  saveYoutubeConfig(config) {
+    this.#writeJson("carplayer_youtube", config);
+  }
+
+  getIptvConfig() {
+    return {
+      playlistUrl: "",
+      epgUrl: "",
+      corsProxy: "",
+      ...this.#readJson("carplayer_iptv", {}),
+    };
+  }
+
+  saveIptvConfig(config) {
+    this.#writeJson("carplayer_iptv", config);
+  }
+
+  getRadioFavorites() {
+    return this.#readJson("carplayer_radio_favorites", []);
+  }
+
+  saveRadioFavorites(stations) {
+    this.#writeJson("carplayer_radio_favorites", stations);
+  }
+
+  /**
+   * Settings snapshot for QR / relay transfer between devices.
+   * History, playback positions and captured thumbnails stay on the device: they are large and device specific.
+   */
+  exportSettings() {
+    const snapshot = {};
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (this.#isTransferableKey(key)) snapshot[key] = localStorage.getItem(key);
+    }
+    return snapshot;
+  }
+
+  importSettings(snapshot) {
+    if (!snapshot || typeof snapshot !== "object") return 0;
+    let imported = 0;
+    Object.entries(snapshot).forEach(([key, value]) => {
+      if (!this.#isTransferableKey(key) || typeof value !== "string") return;
+      localStorage.setItem(key, value);
+      imported += 1;
+    });
+    return imported;
+  }
+
+  #isTransferableKey(key) {
+    return typeof key === "string"
+      && key.startsWith("carplayer_")
+      && !["carplayer_history", "carplayer_positions", "carplayer_active_tab"].includes(key);
+  }
+
+  #readJson(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    } catch {
+      return fallback;
+    }
+  }
+
+  #writeJson(key, value) {
+    localStorage.setItem(key, JSON.stringify(value));
   }
 
   #getSourceTypeFromId(id) {

@@ -1,4 +1,7 @@
 const RELAY_API_BASE = `${window.location.origin}/api/relay`;
+// The production relay caps one payload at 4 KB, so bigger payloads (settings, WebRTC offers) travel in chunks.
+const RELAY_CHUNK_CHARS = 2500;
+const BUILTIN_MOBILE_MODES = ["share", "settings", "linkshare", "captionshare"];
 
 export default class ShareController {
   #app;
@@ -12,6 +15,12 @@ export default class ShareController {
 
   #shareSuccessTimeout = null;
 
+  #mobileModes = new Map();
+  #payloadHandlers = new Map();
+  #incomingChunks = new Map();
+  #relayPinned = false;
+  #pinnedRefreshTimer = null;
+
   constructor(app, storage) {
     this.#app = app;
     this.#storage = storage;
@@ -19,10 +28,92 @@ export default class ShareController {
     window.addEventListener("DOMContentLoaded", () => {
       void this.#handleDomReady();
     });
+
+    // Registered before any tab controller, so a tab that shows a QR code re-pins the relay after this runs.
+    document.addEventListener("tab-change", () => this.releaseRelayQr());
   }
 
   setPlayerController(playerController) {
     this.#playerController = playerController;
+  }
+
+  /** Phone side: `?<param>=1` (from a car QR code) opens `modalId` on load. */
+  registerMobileMode(param, modalId) {
+    this.#mobileModes.set(param, modalId);
+  }
+
+  /** Car side: route an incoming relay payload `{type, value}` to a feature module. */
+  registerPayloadHandler(type, handler) {
+    this.#payloadHandlers.set(type, handler);
+  }
+
+  isPhoneRelayMode() {
+    return this.#isShareMode();
+  }
+
+  /**
+   * Renders a phone QR code into `container` and keeps polling while the owning view stays open
+   * (a tab is not a modal, so closing modals must not stop its relay).
+   */
+  async showRelayQr(container, mode, size = 220) {
+    if (!container) return;
+    this.#relayPinned = true;
+    clearTimeout(this.#pinnedRefreshTimer);
+    await this.#renderRelayQr({ container, mode, width: size, height: size });
+
+    // Relay sessions expire after a few minutes, but a tab can stay open much longer: renew the QR code in time.
+    const expiresAtMs = Date.parse(String(this.#relaySession?.expiresAt || ""));
+    if (!Number.isFinite(expiresAtMs)) return;
+    this.#pinnedRefreshTimer = setTimeout(() => {
+      if (!this.#relayPinned || !container.isConnected || container.offsetParent === null) return;
+      this.#relaySession = null;
+      void this.showRelayQr(container, mode, size);
+    }, Math.max(30000, expiresAtMs - Date.now() - 20000));
+  }
+
+  releaseRelayQr() {
+    this.#relayPinned = false;
+    clearTimeout(this.#pinnedRefreshTimer);
+    if (!document.querySelector(".modal.active")) this.#stopRelayPolling();
+  }
+
+  sendPayloadToCar(payload) {
+    return this.#sendPayloadToCar(payload);
+  }
+
+  /** Sends to an explicit relay session, e.g. the reply channel a phone or laptop opened. */
+  sendToSession(target, payload) {
+    return this.#sendPayloadToCar(payload, target);
+  }
+
+  /**
+   * Opens a second relay session this device reads from, so the other side can answer
+   * (the default relay only carries phone -> car messages).
+   */
+  async openReplyChannel(onPayload) {
+    const session = await this.#createRelaySession();
+    const chunks = new Map();
+    let timer = null;
+    let closed = false;
+
+    const poll = async () => {
+      if (closed) return;
+      const messages = await this.#receiveRelayMessages(session);
+      messages.forEach((raw) => {
+        const payload = this.#reassembleChunk(raw, chunks);
+        if (payload) onPayload(payload);
+      });
+      if (!closed) timer = setTimeout(() => void poll(), 1000);
+    };
+    timer = setTimeout(() => void poll(), 500);
+
+    return {
+      target: { sessionId: session.sessionId, writeToken: session.writeToken },
+      close: () => {
+        closed = true;
+        clearTimeout(timer);
+      },
+    };
   }
 
   async shareVideo(videoUrl) {
@@ -108,7 +199,7 @@ export default class ShareController {
 
     document.addEventListener("modal-close", (e) => {
       const activeModalClass = document.querySelector(".modal.active");
-      if (!activeModalClass) {
+      if (!activeModalClass && !this.#relayPinned) {
         this.#stopRelayPolling();
       }
     });
@@ -348,6 +439,14 @@ export default class ShareController {
 
     if (params.get("captionshare") === "1") {
       this.#app.openModal("mobileCaptionModal");
+      return;
+    }
+
+    for (const [param, modalId] of this.#mobileModes) {
+      if (params.get(param) === "1") {
+        this.#app.openModal(modalId);
+        return;
+      }
     }
   }
 
@@ -357,9 +456,9 @@ export default class ShareController {
     return this.#renderRelayQr(config);
   }
 
-  async #renderRelayQr({ containerId, mode, width, height, flowContext }) {
-    let qrContainer = null;
-    if (flowContext) {
+  async #renderRelayQr({ container = null, containerId, mode, width, height, flowContext }) {
+    let qrContainer = container;
+    if (!qrContainer && flowContext) {
       const flow = document.querySelector(flowContext);
       if (flow) qrContainer = flow.querySelector(`#${containerId}`);
     }
@@ -413,12 +512,12 @@ export default class ShareController {
       "sid",
       "wt",
       "relay",
+      ...this.#mobileModes.keys(),
     ].forEach((key) => currentUrlObj.searchParams.delete(key));
 
-    if (mode === "share") currentUrlObj.searchParams.set("share", "1");
-    if (mode === "settings") currentUrlObj.searchParams.set("settings", "1");
-    if (mode === "linkshare") currentUrlObj.searchParams.set("linkshare", "1");
-    if (mode === "captionshare") currentUrlObj.searchParams.set("captionshare", "1");
+    if (BUILTIN_MOBILE_MODES.includes(mode) || this.#mobileModes.has(mode)) {
+      currentUrlObj.searchParams.set(mode, "1");
+    }
 
     if (!this.#relaySession?.sessionId || !this.#relaySession?.writeToken) return "";
 
@@ -441,12 +540,7 @@ export default class ShareController {
 
   #isShareMode() {
     const params = new URLSearchParams(window.location.search);
-    return (
-      params.get("share") === "1"
-      || params.get("settings") === "1"
-      || params.get("captionshare") === "1"
-      || params.get("linkshare") === "1"
-    );
+    return [...BUILTIN_MOBILE_MODES, ...this.#mobileModes.keys()].some((mode) => params.get(mode) === "1");
   }
 
   async #ensureRelaySessionReady(force = false) {
@@ -556,6 +650,18 @@ export default class ShareController {
   }
 
   async #pollRelayMessages(session) {
+    const messages = await this.#receiveRelayMessages(session);
+    if (!messages.length) return;
+
+    console.log(`[relay] Received ${messages.length} relay payload(s).`);
+
+    messages.forEach((raw) => {
+      const payload = this.#reassembleChunk(raw, this.#incomingChunks);
+      if (payload) this.#handleIncomingPayload(payload);
+    });
+  }
+
+  async #receiveRelayMessages(session) {
     const query = new URLSearchParams({
       sid: session.sessionId,
       rt: session.readToken,
@@ -574,8 +680,8 @@ export default class ShareController {
 
     if (response.status === 404 || response.status === 410) {
       console.warn(`[relay] Session invalid (${response.status}); stopping polling.`);
-      this.#stopRelayPolling();
-      return;
+      if (session === this.#relaySession) this.#stopRelayPolling();
+      return [];
     }
 
     const payload = await this.#parseJsonSafe(response);
@@ -583,27 +689,70 @@ export default class ShareController {
     if (!response.ok) {
       const reason = payload?.error || `HTTP ${response.status}`;
       console.warn(`[relay] Poll request failed: ${reason}`);
-      return;
+      return [];
     }
 
     const messages = Array.isArray(payload?.messages) ? payload.messages : [];
-    if (!messages.length) return;
-
-    console.log(`[relay] Received ${messages.length} relay payload(s).`);
-
-    messages.forEach((entry) => {
-      const messagePayload = entry?.payload ?? entry;
-      this.#handleIncomingPayload(messagePayload);
-    });
+    return messages.map((entry) => entry?.payload ?? entry);
   }
 
-  async #sendPayloadToCar(payload) {
-    const targetSession = this.#getTargetRelayCredentials();
+  #reassembleChunk(rawPayload, store) {
+    let payload = rawPayload;
+    if (typeof rawPayload === "string") {
+      try {
+        payload = JSON.parse(rawPayload);
+      } catch {
+        return rawPayload;
+      }
+    }
+    if (payload?.type !== "chunk") return payload;
+
+    const { id, index, total, data } = payload;
+    if (!id || !Number.isInteger(index) || !Number.isInteger(total)) return null;
+    const parts = store.get(id) || new Array(total).fill(null);
+    parts[index] = String(data || "");
+    store.set(id, parts);
+    if (parts.some((part) => part === null)) return null;
+
+    store.delete(id);
+    try {
+      return JSON.parse(parts.join(""));
+    } catch {
+      return null;
+    }
+  }
+
+  #splitIntoChunks(payload) {
+    const json = JSON.stringify(payload);
+    if (json.length <= RELAY_CHUNK_CHARS) return [payload];
+
+    const id = Math.random().toString(36).slice(2, 10);
+    const total = Math.ceil(json.length / RELAY_CHUNK_CHARS);
+    return Array.from({ length: total }, (_, index) => ({
+      type: "chunk",
+      id,
+      index,
+      total,
+      data: json.slice(index * RELAY_CHUNK_CHARS, (index + 1) * RELAY_CHUNK_CHARS),
+    }));
+  }
+
+  async #sendPayloadToCar(payload, explicitTarget = null) {
+    const targetSession = explicitTarget || this.#getTargetRelayCredentials();
     if (!targetSession) {
       alert("No active car session found. Scan the QR code from the car screen first.");
       return false;
     }
 
+    const parts = this.#splitIntoChunks(payload);
+    for (const part of parts) {
+      const sent = await this.#postRelayPayload(targetSession, part);
+      if (!sent) return false;
+    }
+    return true;
+  }
+
+  async #postRelayPayload(targetSession, payload) {
     let response;
     try {
       response = await fetch(this.#relayApiUrl("/session/send"), {
@@ -661,6 +810,12 @@ export default class ShareController {
 
     const type = String(payload.type || "").trim();
 
+    const handler = this.#payloadHandlers.get(type);
+    if (handler) {
+      handler(payload.value, payload);
+      return;
+    }
+
     if (type === "video-url") {
       const value = String(payload.value || "").trim();
       if (!value) return;
@@ -706,7 +861,6 @@ export default class ShareController {
     }
 
     this.#app.closeModal("shareAppModal");
-    this.#app.closeModal("urlModal");
 
     this.#playerController?.loadVideo(videoUrl);
   }

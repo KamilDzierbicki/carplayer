@@ -47,6 +47,28 @@ export default class JellyfinService {
         await this.#playerController.loadJellyfinItem(jf, itemId, title, sessionUrl, qualityStr);
     }
 
+    /**
+     * Client + user id for per-user library views (latest, resume, favorites).
+     * An API key is not tied to a user, so the first administrator (or first user) is picked once and stored.
+     * @returns {Promise<{jf: Jellyfin, userId: string}|null>}
+     */
+    async getLibraryClient() {
+        const serverUrl = this.#storage.getJellyfinServerUrl();
+        const apiKey = this.#storage.getJellyfinApiKey();
+        if (!serverUrl || !apiKey) return null;
+
+        const jf = new Jellyfin(serverUrl, apiKey);
+        let userId = this.#storage.getJellyfinUserId();
+        if (!userId) {
+            const users = await jf.listUsers();
+            const user = users.find((entry) => entry?.Policy?.IsAdministrator) || users[0];
+            if (!user?.Id) throw new Error("No Jellyfin user found for this API key.");
+            userId = user.Id;
+            this.#storage.saveJellyfinUserId(userId);
+        }
+        return { jf, userId };
+    }
+
     static parseSessionUrl(url) {
         const raw = String(url || "").trim();
         if (raw.startsWith("jellyfin-item://")) {
@@ -190,6 +212,40 @@ export class Jellyfin {
             }))
             .sort((a, b) => (b.dateCreated || "").localeCompare(a.dateCreated || ""));
         return items;
+    }
+    async listUsers() {
+        const users = await this.#fetchApi(`/Users`);
+        return Array.isArray(users) ? users : [];
+    }
+    async getLatestItems(userId, includeItemTypes, limit = 16) {
+        const params = new URLSearchParams({ IncludeItemTypes: includeItemTypes, Limit: limit, GroupItems: "false", Fields: "DateCreated" });
+        const items = await this.#fetchApi(`/Users/${userId}/Items/Latest?${params.toString()}`);
+        return (Array.isArray(items) ? items : []).map((item) => this.#toLibraryItem(item));
+    }
+    async getResumeItems(userId, limit = 16) {
+        const params = new URLSearchParams({ Limit: limit, MediaTypes: "Video", Recursive: "true" });
+        const data = await this.#fetchApi(`/Users/${userId}/Items/Resume?${params.toString()}`);
+        return (data.Items || []).map((item) => this.#toLibraryItem(item));
+    }
+    async getFavoriteItems(userId, limit = 24) {
+        const params = new URLSearchParams({
+            Filters: "IsFavorite", Recursive: "true", IncludeItemTypes: "Movie,Episode,Video",
+            SortBy: "DateCreated", SortOrder: "Descending", Limit: limit,
+        });
+        const data = await this.#fetchApi(`/Users/${userId}/Items?${params.toString()}`);
+        return (data.Items || []).map((item) => this.#toLibraryItem(item));
+    }
+    #toLibraryItem(item) {
+        const episodeLabel = item.Type === "Episode" && item.SeriesName
+            ? `${item.SeriesName} S${String(item.ParentIndexNumber || 0).padStart(2, "0")}E${String(item.IndexNumber || 0).padStart(2, "0")}`
+            : "";
+        return {
+            id: item.Id,
+            name: episodeLabel ? `${episodeLabel} - ${item.Name}` : item.Name,
+            year: item.ProductionYear,
+            type: item.Type,
+            thumb: `${this.#baseUrl}/Items/${item.Id}/Images/Primary?ApiKey=${this.#apiKey}&maxWidth=480`,
+        };
     }
     async getPlaybackInfo(itemId, options = {}) {
         const { startSeconds = 0, audioIndex = null, subIndex = null, mediaSourceId = null } = options;

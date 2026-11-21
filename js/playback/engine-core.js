@@ -3,6 +3,7 @@ import {
 	CanvasSink,
 	EncodedAudioPacketSource,
 	EncodedPacketSink,
+	HLS_FORMATS,
 	Input,
 	MPEG_TS,
 	Mp4OutputFormat,
@@ -10,7 +11,7 @@ import {
 	Output,
 	ReadableStreamSource,
 	UrlSource,
-} from 'https://cdn.jsdelivr.net/npm/mediabunny@1.34.5/+esm';
+} from 'https://cdn.jsdelivr.net/npm/mediabunny@1.65.2/+esm';
 
 /** @typedef {'idle'|'loading'|'ready'|'playing'|'paused'|'seeking'|'error'} AppState */
 /** @typedef {'direct'|'jellyfin'} SourceMode */
@@ -126,13 +127,22 @@ function toBytes(data) {
 	return new Uint8Array(data.buffer || data);
 }
 
+// Sync track getters are deprecated and may throw for HLS tracks whose metadata is not loaded yet.
+function readSync(read) {
+	try {
+		return read();
+	} catch {
+		return undefined;
+	}
+}
+
 function buildDirectAudioLabel(track, idx) {
-	const name = String(track?.name || '').trim();
+	const name = String(readSync(() => track?.name) || '').trim();
 	if(name) return name;
 
-	const language = String(track?.language || '').trim().toUpperCase();
-	const codec = String(track?.codec || '').trim().toUpperCase();
-	const channels = Number(track?.numberOfChannels ?? track?.channels);
+	const language = String(readSync(() => track?.language) || '').trim().toUpperCase();
+	const codec = String(readSync(() => track?.codec) || '').trim().toUpperCase();
+	const channels = Number(readSync(() => track?.numberOfChannels) ?? track?.channels);
 	const channelsText = Number.isFinite(channels) && channels > 0 ? `${channels}ch` : '';
 
 	const parts = [language, codec, channelsText].filter(Boolean);
@@ -255,12 +265,27 @@ export class SourceFactory {
 	async createDirectBundle({url, selectedTrackId = ''}) {
 		const input = new Input({
 			source: new UrlSource(url),
-			formats: ALL_FORMATS,
+			// HLS_FORMATS lets the same path play .m3u8 playlists (IPTV, live streams).
+			formats: [...new Set([...ALL_FORMATS, ...HLS_FORMATS])],
 		});
 
-		const durationSec = await input.computeDuration();
-		const videoTrack = await input.getPrimaryVideoTrack();
-		const primaryAudioTrack = await input.getPrimaryAudioTrack();
+		const videoTrack = await this.#pickVideoTrack(input);
+		const pairableAudioTrack = typeof videoTrack?.getPrimaryPairableAudioTrack === 'function'
+			? await videoTrack.getPrimaryPairableAudioTrack()
+			: null;
+		const primaryAudioTrack = pairableAudioTrack || await input.getPrimaryAudioTrack();
+
+		const isLive = typeof videoTrack?.isLive === 'function' ? await videoTrack.isLive() : false;
+		let durationSec = 0;
+		let liveStartSec = 0;
+		if(isLive) {
+			// Live playlists never end, so computeDuration() would wait forever.
+			const knownDuration = Number(await videoTrack.getDurationFromMetadata({skipLiveWait: true})) || 0;
+			const refreshInterval = Number(await videoTrack.getLiveRefreshInterval()) || 4;
+			liveStartSec = Math.max(0, knownDuration - 2 * refreshInterval);
+		} else {
+			durationSec = await input.computeDuration();
+		}
 
 		const allAudio = typeof input.getAudioTracks === 'function'
 			? ((await input.getAudioTracks()) || [])
@@ -280,7 +305,7 @@ export class SourceFactory {
 			id: getTrackId(track) || `direct-${index}`,
 			label: buildDirectAudioLabel(track, index),
 			index,
-			language: String(track?.language || ''),
+			language: String(readSync(() => track?.language) || ''),
 			_track: track,
 		}));
 
@@ -303,6 +328,8 @@ export class SourceFactory {
 		return {
 			input,
 			durationSec: Number.isFinite(durationSec) && durationSec > 0 ? durationSec : 0,
+			isLive,
+			liveStartSec,
 			videoTrack,
 			audioTrack,
 			packetSink: new EncodedPacketSink(audioTrack),
@@ -409,6 +436,20 @@ export class SourceFactory {
 			playSessionId: pbData.playSessionId || null,
 			subtitleTracks,
 		};
+	}
+
+	async #pickVideoTrack(input) {
+		const videoTracks = typeof input.getVideoTracks === 'function' ? ((await input.getVideoTracks()) || []) : [];
+		if(videoTracks.length <= 1) return videoTracks[0] || input.getPrimaryVideoTrack();
+
+		// HLS master playlists expose one track per variant; car CPUs and LTE prefer <= 720p.
+		const withHeight = await Promise.all(videoTracks.map(async(track) => ({
+			track,
+			height: Number(await track.getDisplayHeight()) || 0,
+		})));
+		withHeight.sort((a, b) => b.height - a.height);
+		const fitting = withHeight.find((entry) => entry.height > 0 && entry.height <= 720);
+		return (fitting || withHeight[withHeight.length - 1]).track;
 	}
 
 	#buildJellyfinPlaybackQuery({
@@ -698,7 +739,7 @@ export class AudioMsePipeline {
 		this.#transmuxPromise = (async() => {
 			this.reset();
 
-			const packetSource = new EncodedAudioPacketSource(audioTrack.codec);
+			const packetSource = new EncodedAudioPacketSource(await audioTrack.getCodec());
 			const format = new Mp4OutputFormat({
 				fastStart: 'fragmented',
 				minimumFragmentDuration: 0.35,
@@ -998,14 +1039,16 @@ export class VideoCanvasPipeline {
 		this.#videoTimestampOffsetSec = 0;
 	}
 
-	configure(videoTrack) {
+	async configure(videoTrack) {
 		this.#canvasSink = new CanvasSink(videoTrack, {fit: 'contain', poolSize: 2});
+		const displayWidth = await videoTrack.getDisplayWidth();
+		const displayHeight = await videoTrack.getDisplayHeight();
 		// Avoid clearing the canvas on every seek/rebuffer when dimensions are unchanged.
-		if(this.#canvas.width !== videoTrack.displayWidth) {
-			this.#canvas.width = videoTrack.displayWidth;
+		if(this.#canvas.width !== displayWidth) {
+			this.#canvas.width = displayWidth;
 		}
-		if(this.#canvas.height !== videoTrack.displayHeight) {
-			this.#canvas.height = videoTrack.displayHeight;
+		if(this.#canvas.height !== displayHeight) {
+			this.#canvas.height = displayHeight;
 		}
 	}
 

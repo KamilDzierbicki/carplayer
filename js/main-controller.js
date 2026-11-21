@@ -5,6 +5,7 @@ export default class MainController {
     #playerController;
     #jellyfinService;
     #settingsController;
+    #shareController;
     #fullscreenRedirectUrl = null;
 
     constructor(dependencies) {
@@ -14,6 +15,7 @@ export default class MainController {
         this.#playerController = dependencies.playerController;
         this.#jellyfinService = dependencies.jellyfinService;
         this.#settingsController = dependencies.settingsController;
+        this.#shareController = dependencies.shareController;
 
         this.#bindMainEvents();
     }
@@ -36,7 +38,18 @@ export default class MainController {
             appNav.addEventListener("action-fullscreen", () => {
                 void this.#toggleFullscreenRedirect();
             });
+
+            // Jellyfin results render inside the History tab.
+            appNav.addEventListener("search", (event) => {
+                if (event.detail) document.dispatchEvent(new CustomEvent("request-tab", { detail: { tab: "history" } }));
+            });
         }
+
+        document.addEventListener("tab-change", (event) => {
+            if (event.detail.tab !== "link" || this.#shareController?.isPhoneRelayMode()) return;
+            const qrContainer = document.querySelector("carplayer-add-video-flow #qrcode");
+            void this.#shareController?.showRelayQr(qrContainer, "share", 220);
+        });
 
         const btnConfirmFullscreenRedirect = document.getElementById("btnConfirmFullscreenRedirect");
         if (btnConfirmFullscreenRedirect) {
@@ -84,9 +97,9 @@ export default class MainController {
         if (btnPlaySample) {
             btnPlaySample.addEventListener("click", () => {
                 if (videoUrlInput) {
-                    videoUrlInput.value = "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4";
+                    // Google's gtv-videos-bucket samples now answer 403; Mux's public test stream sends CORS headers.
+                    videoUrlInput.value = "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8";
                 }
-                this.#app.closeModal("urlModal");
                 this.#handleLoadVideo(true);
             });
         }

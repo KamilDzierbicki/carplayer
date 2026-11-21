@@ -16,6 +16,12 @@ import "./components/carplayer-add-video-flow.js";
 import "./components/carplayer-link-relay-flow.js";
 import "./components/carplayer-add-captions-flow.js";
 import "./components/carplayer-media-view.js";
+import "./components/carplayer-dock.js";
+import "./components/carplayer-setup-card.js";
+import "./components/carplayer-youtube.js";
+import "./components/carplayer-iptv.js";
+import "./components/carplayer-radio.js";
+import "./components/carplayer-radio-bar.js";
 
 import AppContainer from "./app-container.js";
 

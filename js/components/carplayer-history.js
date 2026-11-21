@@ -214,7 +214,7 @@ class CarplayerHistory extends HTMLElement {
 
         historyData.forEach((item) => {
             const { id, filename, fullUrl, sourceType, sourceId, sourceServerBaseUrl } = this.#extractItemData(item);
-            const thumbUrl = sourceType === "jellyfin" ? String(item.thumbnailUrl || "") : "";
+            const thumbUrl = String(item.thumbnailUrl || "");
             const placeholderThumbnailUrl = String(item.thumbnailDataUrl || "");
 
             if (q && !filename.toLowerCase().includes(q) && !(fullUrl || "").toLowerCase().includes(q)) {

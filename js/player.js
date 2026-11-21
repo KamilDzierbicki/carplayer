@@ -603,6 +603,7 @@ export default class PlayerController {
 		this.state = STATE.IDLE;
 		this.loaded = false;
 		this.durationSec = 0;
+		this.isLive = false;
 		this.seekBaseSec = 0;
 		this.currentSpeed = this.storage.getSpeed() || 1;
 		this.sourceMode = SOURCE_MODE.DIRECT;
@@ -820,8 +821,14 @@ export default class PlayerController {
 
 		this.seekBaseSec = targetSec;
 		await this._prepareSourceForStart(targetSec, {refreshSubtitles: Boolean(options.refreshSubtitles)});
-		await this._startPipelines(targetSec, sessionToken);
+
+		// Live streams cannot start at an arbitrary time: always join just behind the live edge.
+		const startSec = this.isLive ? this.sourceBundle.liveStartSec : targetSec;
+		this.seekBaseSec = startSec;
+
+		await this._startPipelines(startSec, sessionToken);
 		await this._waitForAudioPriming(sessionToken, options.firstAppendError || 'Audio pipeline did not produce initial data.');
+		return startSec;
 	}
 
 	_stateForTransition(mode) {
@@ -875,25 +882,25 @@ export default class PlayerController {
 				if(this._returnIfStale(token)) return false;
 			}
 
-			await this._rebuildPlaybackAt(target, token, {
+			const playTarget = await this._rebuildPlaybackAt(target, token, {
 				refreshSubtitles,
 				firstAppendError,
 			});
 			if(this._returnIfStale(token)) return false;
 			this._syncVideoTimelineOffsetFromAudio();
 			// Gate audio resume until we can draw a near-target frame to avoid "audio first, black screen".
-			await this.videoPipeline.primeAt(target, {
+			await this.videoPipeline.primeAt(playTarget, {
 				timeoutMs: VIDEO_PRIME_TIMEOUT_MS,
 				maxLeadSec: 0.2,
 			});
 			if(this._returnIfStale(token)) return false;
 
-			this.subs.seekTo(target);
-			this.updateProgressBarTime(target);
-			this.updateBufferedBar(target);
-			if(persistProgress) this._persistPlaybackProgress(target);
+			this.subs.seekTo(playTarget);
+			this.updateProgressBarTime(playTarget);
+			this.updateBufferedBar(playTarget);
+			if(persistProgress) this._persistPlaybackProgress(playTarget);
 
-			const canResume = shouldResume && (!this.durationSec || target < this.durationSec);
+			const canResume = shouldResume && (!this.durationSec || playTarget < this.durationSec);
 			if(canResume) {
 				try {
 					await this.audioPipeline.play();
@@ -923,7 +930,7 @@ export default class PlayerController {
 			}
 
 			if(typeof onAfterSuccess === 'function') {
-				onAfterSuccess(target);
+				onAfterSuccess(playTarget);
 			}
 			return true;
 		} catch(error) {
@@ -943,7 +950,7 @@ export default class PlayerController {
 	}
 
 	_persistPlaybackProgress(timeSec) {
-		if(!this.currentUrl) return;
+		if(!this.currentUrl || this.isLive) return;
 		this.storage.savePlaybackPos(this.currentUrl, timeSec, this.durationSec);
 		this.historyRenderer?.render();
 	}
@@ -1005,7 +1012,9 @@ export default class PlayerController {
 
 		this.sourceBundle = bundle;
 		this.durationSec = bundle.durationSec;
-		this.videoPipeline.configure(bundle.videoTrack);
+		this.isLive = Boolean(bundle.isLive);
+		this.dom.videoControls?.toggleAttribute('live', this.isLive);
+		await this.videoPipeline.configure(bundle.videoTrack);
 		this._syncQualityUi();
 
 		if(options.refreshSubtitles) {
@@ -1065,6 +1074,8 @@ export default class PlayerController {
 
 		this.dom.setupScreen.classList.add('hidden');
 		this.dom.playerScreen.classList.add('active');
+		// Lets other audio sources (radio, mirroring) stop before the video takes over the speakers.
+		document.dispatchEvent(new CustomEvent('playback-start'));
 
 		this.sourceMode = context.mode;
 		this.sourceContext = {...context};
@@ -1094,6 +1105,18 @@ export default class PlayerController {
 
 	async play() {
 		if(!this.loaded || !this.sourceBundle) return;
+
+		if(this.isLive) {
+			// A paused live stream falls behind and its old segments expire, so resume at the live edge.
+			await this._runTransition({
+				targetSec: 0,
+				mode: TRANSITION_MODE.SEEK,
+				autoPlayMode: AUTO_PLAY_MODE.ALWAYS,
+				firstAppendError: 'Live stream did not produce audio data.',
+				persistProgress: false,
+			});
+			return;
+		}
 
 		const token = this.sessionId;
 
@@ -1137,7 +1160,7 @@ export default class PlayerController {
 	}
 
 	async seekToTime(seconds, options = {autoPlay: AUTO_PLAY_MODE.ALWAYS}) {
-		if(!this.loaded || !this.sourceBundle) return;
+		if(!this.loaded || !this.sourceBundle || this.isLive) return;
 		await this._runTransition({
 			targetSec: seconds,
 			mode: TRANSITION_MODE.SEEK,
@@ -1229,18 +1252,26 @@ export default class PlayerController {
 		}
 	}
 
-	async loadVideo(videoUrl) {
+	/**
+	 * @param {string} videoUrl direct file or HLS playlist URL (live playlists are detected automatically)
+	 * @param {{title?: string, sourceType?: string, thumbnailUrl?: string, historyId?: string}} options
+	 *   historyId: stable key for history and resume when the source URL expires (YouTube stream links)
+	 */
+	async loadVideo(videoUrl, options = {}) {
 		if(!videoUrl) return;
 
 		const normalizedUrl = toHttpUrl(videoUrl);
 		if(!normalizedUrl) return;
 
-		this.app.dom.urlInput.value = '';
-		this.app.closeModal('urlModal');
+		if(this.app.dom.urlInput) this.app.dom.urlInput.value = '';
 
-		const title = this.app.getVideoTitleFromUrl(normalizedUrl);
-		this.storage.addHistory(normalizedUrl, title);
-		const {time} = this.storage.getPlaybackPos(normalizedUrl);
+		const historyId = String(options.historyId || '').trim() || normalizedUrl;
+		const title = String(options.title || '').trim() || this.app.getVideoTitleFromUrl(normalizedUrl);
+		this.storage.addHistory(historyId, title, {
+			sourceType: options.sourceType,
+			thumbnailUrl: options.thumbnailUrl,
+		});
+		const {time} = this.storage.getPlaybackPos(historyId);
 
 		await this._loadSource({
 			mode: SOURCE_MODE.DIRECT,
@@ -1248,7 +1279,7 @@ export default class PlayerController {
 			directAudioTrackId: '',
 			quality: this.selectedQuality,
 		}, {
-			url: normalizedUrl,
+			url: historyId,
 			title,
 			startTime: time || 0,
 		});
@@ -1324,6 +1355,8 @@ export default class PlayerController {
 		this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
 		this.loaded = false;
 		this.durationSec = 0;
+		this.isLive = false;
+		this.dom.videoControls?.removeAttribute('live');
 		this.seekBaseSec = 0;
 		this.sourceBundle = null;
 		this.sourceContext = null;

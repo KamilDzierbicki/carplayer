@@ -79,8 +79,8 @@ export default class CarPlayerCore {
 		}
 	}
 
+	/** "Add Video" lives in the Link tab now; the name is kept for existing callers. */
 	openUrlModal() {
-		// Reset the clearable-input component
 		const urlInput = document.getElementById("videoUrl");
 		if(urlInput) urlInput.value = "";
 
@@ -88,7 +88,7 @@ export default class CarPlayerCore {
 			this.#dom.btnLoad.classList.add("is-disabled");
 		}
 
-		this.openModal("urlModal");
+		document.dispatchEvent(new CustomEvent("request-tab", {detail: {tab: "link"}}));
 	}
 
 	formatTime(seconds) {

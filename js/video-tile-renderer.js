@@ -112,6 +112,32 @@ export default class VideoTileRenderer {
     return tile;
   }
 
+  static createYouTubeSearchTile({ id, title, durationText, thumbnailUrl, channelName, viewCountText }) {
+    const safeTitle = String(title || "");
+    const metaText = [channelName, viewCountText].filter(Boolean).join(" • ");
+
+    const tile = document.createElement("div");
+    tile.className = "video-tile";
+    tile.setAttribute("data-action", "play-video");
+    tile.setAttribute("data-play-type", "youtube");
+    tile.setAttribute("data-video-id", this.#escapeAttr(String(id || "")));
+    tile.setAttribute("data-video-title", encodeURIComponent(safeTitle));
+
+    const thumbnailHtml = this.#buildSharedThumbnail({
+      activeThumbUrl: this.#escapeUrlForCss(thumbnailUrl),
+      durationHtml: this.#escapeHtml(String(durationText || "")),
+    });
+
+    tile.innerHTML = `
+      ${thumbnailHtml}
+      <div class="tile-info">
+        <div class="tile-title" title="${this.#escapeAttr(safeTitle)}">${this.#escapeHtml(safeTitle)}</div>
+      </div>
+      <div class="video-meta">${this.#escapeHtml(metaText)}</div>
+    `;
+    return tile;
+  }
+
   static #buildSharedThumbnail({ activeThumbUrl, durationHtml, progressHtml, actionsHtml }) {
     const hasThumb = Boolean(activeThumbUrl);
     const thumbClass = hasThumb ? "tile-thumbnail tile-thumbnail--cover" : "tile-thumbnail";

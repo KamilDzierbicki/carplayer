@@ -35,13 +35,156 @@
   <div id="setupScreen">
     <carplayer-navbar></carplayer-navbar>
 
-    <carplayer-history id="historyComponent"></carplayer-history>
-    <carplayer-jellyfin-search-results id="jellyfinSearchComponent" class="hidden"></carplayer-jellyfin-search-results>
+    <main class="tab-panels">
+      <section class="tab-panel" data-tab-panel="dashboard" aria-label="Dashboard">
+        <div class="tab-heading">
+          <h2 class="tab-heading__title">Dashboard</h2>
+          <button class="btn btn--dark btn--compact" id="btnEditWidgets" type="button">
+            <span class="icon icon--sm icon-mask icon-mask--tune" aria-hidden="true"></span>
+            Edit widgets
+          </button>
+        </div>
+        <div class="widget-grid" id="dashboardGrid"></div>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="history" aria-label="History">
+        <carplayer-history id="historyComponent"></carplayer-history>
+        <carplayer-jellyfin-search-results id="jellyfinSearchComponent" class="hidden"></carplayer-jellyfin-search-results>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="youtube" aria-label="YouTube">
+        <carplayer-youtube id="youtubeComponent"></carplayer-youtube>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="iptv" aria-label="IPTV">
+        <carplayer-iptv id="iptvComponent"></carplayer-iptv>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="radio" aria-label="Radio">
+        <carplayer-radio id="radioComponent"></carplayer-radio>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="link" aria-label="Open video via link">
+        <div class="link-panel">
+          <h2 class="tab-heading__title">Open video via link</h2>
+          <carplayer-add-video-flow></carplayer-add-video-flow>
+        </div>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="mirror" aria-label="Screen mirroring">
+        <div class="setup-card mirror-panel" id="mirrorPanel">
+          <header class="setup-card__header">
+            <h2 class="setup-card__title">Mirror a laptop screen</h2>
+            <p class="section-note">Show your laptop screen on the car display. The picture is drawn on a canvas, the same way as videos. Phones cannot share their screen from a browser.</p>
+          </header>
+          <div class="setup-card__body">
+            <div class="qr-card setup-card__qr" data-role="qr"></div>
+            <carplayer-step-list title="How to start:">
+              <carplayer-step-item number="1"><p>Scan this QR code, or open its link on your laptop (Chrome, Edge or Firefox).</p></carplayer-step-item>
+              <carplayer-step-item number="2"><p>Click "Share my screen" and pick a screen, window or tab.</p></carplayer-step-item>
+              <carplayer-step-item number="3"><p>The picture appears here. Tab audio is sent too when the browser allows it.</p></carplayer-step-item>
+            </carplayer-step-list>
+          </div>
+          <p class="section-note" data-role="status">Waiting for a laptop...</p>
+        </div>
+      </section>
+    </main>
+
     <carplayer-footer></carplayer-footer>
+    <div class="app-bottom">
+      <carplayer-radio-bar id="radioBar"></carplayer-radio-bar>
+      <carplayer-dock id="appDock"></carplayer-dock>
+    </div>
+  </div>
+
+  <div id="mirrorScreen" class="mirror-screen hidden">
+    <canvas aria-label="Mirrored screen"></canvas>
+    <button class="btn btn--glass mirror-screen__stop" data-action="stop-mirror" type="button">
+      <span class="icon icon--sm icon-mask icon-mask--stop" aria-hidden="true"></span>
+      Stop mirroring
+    </button>
   </div>
 
   <carplayer-modal id="settingsModal" modal-title="Settings" variant="settings">
     <carplayer-jellyfin-settings-form></carplayer-jellyfin-settings-form>
+    <button class="btn btn--secondary btn--block" id="btnOpenTransfer" type="button">
+      <span class="icon icon--sm icon-mask icon-mask--transfer" aria-hidden="true"></span>
+      Export or import settings with a phone
+    </button>
+  </carplayer-modal>
+
+  <carplayer-modal id="widgetsModal" modal-title="Widgets" variant="settings">
+    <div id="widgetManager" class="widget-manager"></div>
+  </carplayer-modal>
+
+  <carplayer-modal id="transferModal" modal-title="Transfer settings" variant="settings">
+    <p class="section-note">Settings are saved in this browser. Copy them to a phone, or bring them from a phone, with a QR code. History is not copied.</p>
+    <div class="transfer-grid">
+      <section class="transfer-grid__item">
+        <h3 class="widget-manager__title">Export to phone</h3>
+        <div class="qr-card" id="exportSettingsQr"></div>
+        <p class="section-note">Scan with the phone camera. The phone opens CarPlayer and asks before it saves the settings.</p>
+      </section>
+      <section class="transfer-grid__item">
+        <h3 class="widget-manager__title">Import from phone</h3>
+        <div class="qr-card" id="importSettingsQr"></div>
+        <p class="section-note">Scan on a phone that already has CarPlayer set up, then tap "Send settings to car".</p>
+      </section>
+    </div>
+  </carplayer-modal>
+
+  <carplayer-modal id="settingsSenderModal" modal-title="Send Settings to Car">
+    <p class="section-note section-note--center">
+      Sends the settings saved on this phone (Jellyfin, YouTube proxy, IPTV, radio favorites, widgets) to the car.
+    </p>
+    <button class="btn btn--primary btn--share btn--block" id="btnSendSettingsToCar" type="button">
+      <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
+      Send settings to car
+    </button>
+  </carplayer-modal>
+
+  <carplayer-modal id="mobileYoutubeModal" modal-title="Send YouTube Proxy to Car">
+    <p class="section-note section-note--center">Paste the address of your CORS proxy for YouTube (for example https://proxy.example/?url={url}).</p>
+    <carplayer-clearable-input id="mobileYoutubeProxyInput" type="text" placeholder="https://proxy.example/?url={url}"
+      class="field field--url">
+    </carplayer-clearable-input>
+    <button class="btn btn--primary btn--share btn--block" id="btnSendYoutubeConfig" type="button">
+      <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
+      Send to Car
+    </button>
+  </carplayer-modal>
+
+  <carplayer-modal id="mobileIptvModal" modal-title="Send IPTV Links to Car">
+    <p class="section-note section-note--center">Paste the M3U playlist link and, optionally, the EPG (program guide) link.</p>
+    <carplayer-clearable-input id="mobileIptvPlaylistInput" type="url" placeholder="https://provider.example/playlist.m3u"
+      class="field field--url">
+    </carplayer-clearable-input>
+    <carplayer-clearable-input id="mobileIptvEpgInput" type="url" placeholder="https://provider.example/epg.xml.gz (optional)"
+      class="field field--url">
+    </carplayer-clearable-input>
+    <button class="btn btn--primary btn--share btn--block" id="btnSendIptvConfig" type="button">
+      <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
+      Send to Car
+    </button>
+  </carplayer-modal>
+
+  <carplayer-modal id="mirrorSenderModal" modal-title="Mirror This Screen to the Car">
+    <p class="section-note section-note--center">
+      Your screen is sent directly to the car (WebRTC). Use Chrome, Edge or Firefox on a computer.
+    </p>
+    <button class="btn btn--primary btn--block" id="btnStartMirror" type="button">
+      <span class="icon icon--md icon--ink icon-mask icon-mask--cast" aria-hidden="true"></span>
+      Share my screen
+    </button>
+    <button class="btn btn--secondary btn--block hidden" id="btnStopMirror" type="button">
+      <span class="icon icon--md icon-mask icon-mask--stop" aria-hidden="true"></span>
+      Stop sharing
+    </button>
+    <button class="btn btn--secondary btn--block hidden" id="btnShareMirrorLink" type="button">
+      <span class="icon icon--md icon-mask icon-mask--share" aria-hidden="true"></span>
+      Send this link to my laptop
+    </button>
+    <p class="section-note section-note--center" id="mirrorSenderStatus"></p>
   </carplayer-modal>
 
   <carplayer-modal id="mobileApiModal" modal-title="Send Jellyfin Settings to Car">
@@ -55,10 +198,6 @@
       <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
       Send to Car
     </button>
-  </carplayer-modal>
-
-  <carplayer-modal id="urlModal" modal-title="Add Video">
-    <carplayer-add-video-flow></carplayer-add-video-flow>
   </carplayer-modal>
 
   <carplayer-modal id="shareAppModal" modal-title="Send to Car">
