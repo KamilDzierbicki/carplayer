@@ -8,7 +8,9 @@ import { channelFavoriteKey } from "../iptv-parsers.js";
  * Events: 'save-config' {playlistUrl, epgUrl, corsProxy}, 'reload', 'edit-config',
  *         'play-channel' {channelId}
  */
-const MAX_VISIBLE_CHANNELS = 400;
+// Rows rendered above and below the visible part: a quick scroll shows no empty rows, and the rows are rebuilt
+// only after scrolling this far.
+const OVERSCAN_ROWS = 8;
 const HOUR_MS = 3600 * 1000;
 const HALF_HOUR_MS = HOUR_MS / 2;
 const GUIDE_HOURS_AHEAD = 12;
@@ -28,7 +30,11 @@ export default class CarplayerIptv extends HTMLElement {
   #filterTimer = null;
   #loading = false;
   #windowFrom = 0;
-  #logoObserver = null;
+  // Virtual list: only the rows in view are in the DOM (see #renderSlice).
+  #grid = null;
+  #sliceRange = "";
+  #sliceFrame = 0;
+  #sizeObserver = null;
 
   connectedCallback() {
     if (this.#rendered) return;
@@ -87,6 +93,7 @@ export default class CarplayerIptv extends HTMLElement {
 
   disconnectedCallback() {
     clearInterval(this.#clockTimer);
+    this.#sizeObserver?.disconnect();
   }
 
   get qrContainer() {
@@ -173,6 +180,11 @@ export default class CarplayerIptv extends HTMLElement {
       }
       this.#emitPlay(event.target.closest("[data-channel-id]")?.dataset.channelId);
     });
+    // A logo that fails to load shows the channel initials; "error" does not bubble, so it is caught on the way down.
+    this.querySelector('[data-role="list"]').addEventListener("error", (event) => {
+      const logo = event.target.closest?.(".epg__logo");
+      if (logo) logo.textContent = logo.dataset.initials || "";
+    }, true);
 
     // Every minute: move the "now" line and the live highlight in place; rebuild only when the hour window moves.
     this.#clockTimer = setInterval(() => {
@@ -260,10 +272,10 @@ export default class CarplayerIptv extends HTMLElement {
       return !this.#query || channel.name.toLowerCase().includes(this.#query);
     });
     // Favorites first, otherwise in playlist order.
-    const visible = [...matching.filter((channel) => this.#isFavorite(channel)), ...matching.filter((channel) => !this.#isFavorite(channel))];
-    const shown = visible.slice(0, MAX_VISIBLE_CHANNELS);
+    const shown = [...matching.filter((channel) => this.#isFavorite(channel)), ...matching.filter((channel) => !this.#isFavorite(channel))];
 
     if (!shown.length) {
+      this.#grid = null;
       if (this.#loading) {
         container.replaceChildren();
         return;
@@ -273,123 +285,128 @@ export default class CarplayerIptv extends HTMLElement {
     }
 
     container.replaceChildren(this.#buildGuideGrid(shown));
-    if (visible.length > shown.length) {
-      container.appendChild(emptyNote(`Showing ${shown.length} of ${visible.length} channels. Use the filter to narrow the list.`));
-    }
+    this.#renderSlice();
     this.#scrollToNow();
   }
 
   /**
    * TV guide table: channels in a sticky left column, programmes on a horizontal timeline.
    * The timeline runs from the last full hour before (now - 1h) to (now + GUIDE_HOURS_AHEAD).
+   * Rows have a fixed height, so the body is as tall as all channels but holds only the rows in view
+   * (#renderSlice): big playlists stay fast on weak car and phone CPUs.
    */
   #buildGuideGrid(channels) {
     const now = Date.now();
     const from = startOfHour(now - HOUR_MS);
     const to = now + GUIDE_HOURS_AHEAD * HOUR_MS;
     const toX = (ms) => ((Math.min(Math.max(ms, from), to) - from) / HOUR_MS) * PX_PER_HOUR;
-
     this.#windowFrom = from;
+
     const scroller = document.createElement("div");
-    // Channel logos load only when their row comes near the visible part of the table.
-    this.#logoObserver?.disconnect();
-    this.#logoObserver = "IntersectionObserver" in window ? new IntersectionObserver((entries) => {
-      entries.forEach((entry) => {
-        if (!entry.isIntersecting) return;
-        entry.target.src = entry.target.dataset.src;
-        this.#logoObserver.unobserve(entry.target);
-      });
-    }, { root: scroller, rootMargin: "200px" }) : null;
     scroller.className = "epg";
     scroller.dataset.role = "scroller";
     scroller.style.setProperty("--epg-track-width", `${toX(to)}px`);
 
-    const header = document.createElement("div");
-    header.className = "epg__row epg__row--header";
-    header.innerHTML = '<div class="epg__corner"></div><div class="epg__track epg__timeline"></div>';
-    header.querySelector(".epg__corner").textContent = `Now ${formatClock(now)}`;
-    const timeline = header.querySelector(".epg__timeline");
+    let ticks = "";
     for (let hour = from; hour < to; hour += HALF_HOUR_MS) {
-      const tick = document.createElement("span");
-      tick.className = `epg__tick${(hour - from) % HOUR_MS ? " epg__tick--half" : ""}`;
-      tick.style.insetInlineStart = `${toX(hour)}px`;
-      tick.textContent = formatClock(hour);
-      timeline.appendChild(tick);
+      const half = (hour - from) % HOUR_MS ? " epg__tick--half" : "";
+      ticks += `<span class="epg__tick${half}" style="inset-inline-start:${toX(hour)}px">${formatClock(hour)}</span>`;
     }
+    scroller.innerHTML = `
+      <div class="epg__row epg__row--header">
+        <div class="epg__corner">Now ${formatClock(now)}</div>
+        <div class="epg__track epg__timeline">${ticks}</div>
+      </div>
+      <div class="epg__body">
+        <div class="epg__rows" data-role="rows"></div>
+        <span class="epg__now" style="--epg-now:${toX(now)}px"></span>
+      </div>`;
 
-    const rows = channels.map((channel) => {
-      const row = document.createElement("div");
-      row.className = "epg__row";
-      const current = this.#currentProgramme(channel.id, now);
-      row.appendChild(this.#buildChannelCell(channel, current?.title || ""));
-
-      const track = document.createElement("div");
-      track.className = "epg__track";
-      const programmes = (this.#guide.get(channel.id) || []).filter((entry) => entry.stop > from && entry.start < to);
-      if (!programmes.length) {
-        const none = document.createElement("span");
-        none.className = "epg__none";
-        none.textContent = this.#guideLoading ? "Loading program guide..." : "No program guide";
-        track.appendChild(none);
-      }
-      programmes.forEach((programme) => {
-        const block = document.createElement("button");
-        block.type = "button";
-        const state = programme.stop <= now ? " is-past" : programme.start <= now ? " is-live" : "";
-        block.className = `epg__programme${state}`;
-        block.dataset.start = String(programme.start);
-        block.dataset.stop = String(programme.stop);
-        block.dataset.channelId = channel.id;
-        block.style.insetInlineStart = `${toX(programme.start)}px`;
-        block.style.inlineSize = `${Math.max(toX(programme.stop) - toX(programme.start), 2)}px`;
-        block.title = [`${formatClock(programme.start)} - ${formatClock(programme.stop)}  ${programme.title}`, programme.desc].filter(Boolean).join("\n\n");
-        block.innerHTML = '<span class="epg__programme-label"><span class="epg__programme-title"></span><span class="epg__programme-time"></span></span>';
-        block.querySelector(".epg__programme-title").textContent = programme.title;
-        block.querySelector(".epg__programme-time").textContent = `${formatClock(programme.start)} - ${formatClock(programme.stop)}`;
-        track.appendChild(block);
+    this.#grid = { channels, from, to, toX, scroller, rowHeight: 0 };
+    this.#sliceRange = "";
+    scroller.addEventListener("scroll", () => {
+      if (this.#sliceFrame) return;
+      this.#sliceFrame = requestAnimationFrame(() => {
+        this.#sliceFrame = 0;
+        this.#renderSlice();
       });
-      row.appendChild(track);
-      return row;
+    }, { passive: true });
+    // The table is built while the tab may be hidden (size 0); it fills in once it gets a size, and on resizes.
+    this.#sizeObserver?.disconnect();
+    this.#sizeObserver = new ResizeObserver(() => {
+      this.#sliceRange = "";
+      this.#renderSlice();
     });
-
-    const body = document.createElement("div");
-    body.className = "epg__body";
-    const nowLine = document.createElement("span");
-    nowLine.className = "epg__now";
-    nowLine.style.setProperty("--epg-now", `${toX(now)}px`);
-    body.append(...rows, nowLine);
-
-    scroller.append(header, body);
+    this.#sizeObserver.observe(scroller);
     return scroller;
   }
 
-  #buildChannelCell(channel, subtitle) {
+  /** Puts only the rows in view (plus OVERSCAN_ROWS) into the DOM, as one HTML string. */
+  #renderSlice() {
+    const grid = this.#grid;
+    if (!grid?.scroller.isConnected) return;
+    const { channels, scroller } = grid;
+    const body = scroller.querySelector(".epg__body");
+    const rowsBox = scroller.querySelector('[data-role="rows"]');
+    if (!grid.rowHeight) {
+      const rem = parseFloat(getComputedStyle(scroller).getPropertyValue("--epg-row-height")) || 4.25;
+      grid.rowHeight = rem * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+    }
+    const rowHeight = grid.rowHeight;
+    body.style.blockSize = `${channels.length * rowHeight}px`;
+
+    const headerHeight = scroller.querySelector(".epg__row--header")?.offsetHeight || 0;
+    const top = Math.max(0, scroller.scrollTop - headerHeight);
+    const viewHeight = scroller.clientHeight || window.innerHeight;
+    const visibleFirst = Math.floor(top / rowHeight);
+    const visibleLast = Math.min(channels.length, Math.ceil((top + viewHeight) / rowHeight));
+    // Rebuild only when the rows in view leave the rendered range, not on every row scrolled past.
+    const [renderedFirst, renderedLast] = this.#sliceRange ? this.#sliceRange.split("-").map(Number) : [-1, -1];
+    if (renderedFirst >= 0 && visibleFirst >= renderedFirst && visibleLast <= renderedLast) return;
+    const first = Math.max(0, visibleFirst - OVERSCAN_ROWS);
+    const last = Math.min(channels.length, visibleLast + OVERSCAN_ROWS);
+    this.#sliceRange = `${first}-${last}`;
+
+    const now = Date.now();
+    rowsBox.style.paddingBlockStart = `${first * rowHeight}px`;
+    rowsBox.innerHTML = channels.slice(first, last).map((channel) => this.#rowHtml(channel, now)).join("");
+    // Rows are replaced on scroll, so the now line and live states come from the clock, not from older markup.
+    this.#tick();
+  }
+
+  #rowHtml(channel, now) {
+    const { from, to, toX } = this.#grid;
     const favorite = this.#isFavorite(channel);
-    const cell = document.createElement("div");
-    cell.className = "epg__channel";
-    cell.innerHTML = `
-      <button class="epg__channel-play" type="button" data-channel-id="">
-        <span class="epg__logo"></span>
-        <span class="epg__channel-text">
-          <span class="epg__channel-name"></span>
-          <span class="epg__channel-now"></span>
-        </span>
-      </button>
-      <button class="icon-btn icon-btn--compact epg__favorite${favorite ? " is-active" : ""}" type="button" data-favorite-key=""
-        aria-pressed="${favorite}">
-        <span class="icon icon--sm icon-mask ${favorite ? "icon-mask--heart" : "icon-mask--heart-outline"}" aria-hidden="true"></span>
-      </button>
-    `;
-    const play = cell.querySelector(".epg__channel-play");
-    play.dataset.channelId = channel.id;
-    play.title = `Watch ${channel.name}`;
-    const favoriteButton = cell.querySelector(".epg__favorite");
-    favoriteButton.dataset.favoriteKey = channelFavoriteKey(channel);
-    favoriteButton.setAttribute("aria-label", `${favorite ? "Remove from" : "Add to"} favorites: ${channel.name}`);
-    this.#setLogo(cell.querySelector(".epg__logo"), channel);
-    cell.querySelector(".epg__channel-name").textContent = channel.name;
-    cell.querySelector(".epg__channel-now").textContent = subtitle;
-    return cell;
+    const current = this.#currentProgramme(channel.id, now);
+    const logo = /^https?:\/\//i.test(channel.logo || "")
+      ? `<img src="${escapeHtml(channel.logo)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+      : escapeHtml(initials(channel.name));
+    const programmes = (this.#guide.get(channel.id) || []).filter((entry) => entry.stop > from && entry.start < to);
+    const blocks = programmes.length
+      ? programmes.map((programme) => {
+        const state = programme.stop <= now ? " is-past" : programme.start <= now ? " is-live" : "";
+        const left = toX(programme.start);
+        const width = Math.max(toX(programme.stop) - left, 2);
+        const time = `${formatClock(programme.start)} - ${formatClock(programme.stop)}`;
+        const tooltip = [`${time}  ${programme.title}`, programme.desc].filter(Boolean).join("\n\n");
+        return `<button type="button" class="epg__programme${state}" data-start="${programme.start}" data-stop="${programme.stop}"
+          data-channel-id="${escapeHtml(channel.id)}" style="inset-inline-start:${left}px;inline-size:${width}px" title="${escapeHtml(tooltip)}"><span
+          class="epg__programme-label"><span class="epg__programme-title">${escapeHtml(programme.title)}</span><span
+          class="epg__programme-time">${time}</span></span></button>`;
+      }).join("")
+      : `<span class="epg__none">${this.#guideLoading ? "Loading program guide..." : "No program guide"}</span>`;
+    const name = escapeHtml(channel.name);
+    return `<div class="epg__row"><div class="epg__channel">
+        <button class="epg__channel-play" type="button" data-channel-id="${escapeHtml(channel.id)}" title="Watch ${name}">
+          <span class="epg__logo" data-initials="${escapeHtml(initials(channel.name))}">${logo}</span>
+          <span class="epg__channel-text"><span class="epg__channel-name">${name}</span><span
+            class="epg__channel-now">${escapeHtml(current?.title || "")}</span></span>
+        </button>
+        <button class="icon-btn icon-btn--compact epg__favorite${favorite ? " is-active" : ""}" type="button"
+          data-favorite-key="${escapeHtml(channelFavoriteKey(channel))}" aria-pressed="${favorite}"
+          aria-label="${favorite ? "Remove from" : "Add to"} favorites: ${name}"><span
+          class="icon icon--sm icon-mask ${favorite ? "icon-mask--heart" : "icon-mask--heart-outline"}" aria-hidden="true"></span></button>
+      </div><div class="epg__track">${blocks}</div></div>`;
   }
 
   #isFavorite(channel) {
@@ -408,31 +425,18 @@ export default class CarplayerIptv extends HTMLElement {
   #currentProgramme(channelId, now) {
     return (this.#guide.get(channelId) || []).find((entry) => entry.start <= now && entry.stop > now) || null;
   }
-
-  #setLogo(element, channel) {
-    if (channel.logo) {
-      const img = document.createElement("img");
-      if (this.#logoObserver) {
-        img.dataset.src = channel.logo;
-        this.#logoObserver.observe(img);
-      } else {
-        img.src = channel.logo;
-      }
-      img.alt = "";
-      img.loading = "lazy";
-      img.referrerPolicy = "no-referrer";
-      img.addEventListener("error", () => {
-        element.textContent = initials(channel.name);
-      }, { once: true });
-      element.replaceChildren(img);
-    } else {
-      element.textContent = initials(channel.name);
-    }
-  }
 }
 
 function initials(name) {
   return String(name || "?").replace(/[^\p{L}\p{N} ]/gu, "").split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase();
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function emptyNote(text) {
