@@ -886,8 +886,10 @@
     font-size: 0.83rem;
   }
 
+  /* Above the modal body: a setup card's header sits under the button and would otherwise take its taps */
   .modal__close {
     position: absolute;
+    z-index: 1;
     inset-inline-end: var(--space-4);
     inset-block-start: var(--space-4);
     color: var(--color-muted);
