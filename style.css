@@ -3990,10 +3990,9 @@
     }
   }
 
-  /* A programme that started before the visible part keeps its title readable at the channel column edge */
+  /* Not sticky on purpose: a sticky label in every programme made horizontal scrolling about 10x more expensive to
+     paint on slow car CPUs. The channel column already shows the title of the programme on now. */
   .epg__programme-label {
-    position: sticky;
-    inset-inline-start: calc(var(--epg-channel-width) + var(--space-2));
     display: flex;
     flex-direction: column;
     gap: 0.1rem;

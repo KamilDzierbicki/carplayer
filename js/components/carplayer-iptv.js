@@ -335,6 +335,7 @@ export default class CarplayerIptv extends HTMLElement {
     this.#sizeObserver?.disconnect();
     this.#sizeObserver = new ResizeObserver(() => {
       this.#sliceRange = "";
+      if (this.#grid) this.#grid.rowHeight = 0;
       this.#renderSlice();
     });
     this.#sizeObserver.observe(scroller);
@@ -348,14 +349,15 @@ export default class CarplayerIptv extends HTMLElement {
     const { channels, scroller } = grid;
     const body = scroller.querySelector(".epg__body");
     const rowsBox = scroller.querySelector('[data-role="rows"]');
+    // Sizes are measured once per table (and again after a resize), not on every scroll frame.
     if (!grid.rowHeight) {
       const rem = parseFloat(getComputedStyle(scroller).getPropertyValue("--epg-row-height")) || 4.25;
       grid.rowHeight = rem * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+      grid.headerHeight = scroller.querySelector(".epg__row--header")?.offsetHeight || 0;
+      body.style.blockSize = `${channels.length * grid.rowHeight}px`;
     }
-    const rowHeight = grid.rowHeight;
-    body.style.blockSize = `${channels.length * rowHeight}px`;
+    const { rowHeight, headerHeight } = grid;
 
-    const headerHeight = scroller.querySelector(".epg__row--header")?.offsetHeight || 0;
     const top = Math.max(0, scroller.scrollTop - headerHeight);
     const viewHeight = scroller.clientHeight || window.innerHeight;
     const visibleFirst = Math.floor(top / rowHeight);
@@ -368,10 +370,17 @@ export default class CarplayerIptv extends HTMLElement {
     this.#sliceRange = `${first}-${last}`;
 
     const now = Date.now();
+    const html = (from, to) => channels.slice(from, to).map((channel) => this.#rowHtml(channel, now)).join("");
     rowsBox.style.paddingBlockStart = `${first * rowHeight}px`;
-    rowsBox.innerHTML = channels.slice(first, last).map((channel) => this.#rowHtml(channel, now)).join("");
-    // Rows are replaced on scroll, so the now line and live states come from the clock, not from older markup.
-    this.#tick();
+    if (renderedFirst < 0 || first >= renderedLast || last <= renderedFirst) {
+      rowsBox.innerHTML = html(first, last);
+      return;
+    }
+    // Scrolling keeps the rows still in range and only adds and removes rows at the edges.
+    for (let index = renderedFirst; index < first; index++) rowsBox.firstElementChild?.remove();
+    for (let index = last; index < renderedLast; index++) rowsBox.lastElementChild?.remove();
+    if (first < renderedFirst) rowsBox.insertAdjacentHTML("afterbegin", html(first, renderedFirst));
+    if (last > renderedLast) rowsBox.insertAdjacentHTML("beforeend", html(renderedLast, last));
   }
 
   #rowHtml(channel, now) {
