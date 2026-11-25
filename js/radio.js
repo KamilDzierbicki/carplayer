@@ -19,6 +19,10 @@ const EXTRA_STATIONS = Object.freeze([
   countrycode: "PL", tags: "",
 })));
 
+function compact(text) {
+  return text.replace(/[^\p{L}\p{N}]/gu, "");
+}
+
 /** Internet radio: station directory, favorites in localStorage and playback through a plain <audio> element. */
 export default class RadioController {
   #app;
@@ -139,8 +143,11 @@ export default class RadioController {
   async #search(query) {
     this.#view.setSection("results");
     this.#view.setStations("results", { loading: true });
-    const needle = query.toLowerCase();
-    const extras = EXTRA_STATIONS.filter((item) => item.name.toLowerCase().includes(needle)).map((item) => this.#normalize(item));
+    // Every typed word must appear in the name, ignoring case, spaces and punctuation: "yanosik xmas" finds "X-MAS".
+    const words = query.toLowerCase().split(/\s+/).map(compact).filter(Boolean);
+    const extras = EXTRA_STATIONS
+      .filter((item) => words.every((word) => compact(item.name.toLowerCase()).includes(word)))
+      .map((item) => this.#normalize(item));
     try {
       const stations = await this.#fetchStations(`name=${encodeURIComponent(query)}`);
       this.#view.setStations("results", { stations: [...stations, ...extras] });
