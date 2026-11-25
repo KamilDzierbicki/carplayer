@@ -4155,7 +4155,11 @@
     place-items: center;
     background: #000;
 
+    /* Pinned to the screen edges: a percentage height made a portrait phone frame grow taller than the screen.
+       object-fit shows the whole frame, with black bars where its shape differs from the screen. */
     canvas {
+      position: absolute;
+      inset: 0;
       inline-size: 100%;
       block-size: 100%;
       max-inline-size: none;
