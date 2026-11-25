@@ -1,5 +1,8 @@
 const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const ICE_GATHER_TIMEOUT_MS = 4000;
+// A phone browser pauses the picture and its connection while the sharing tab is in the background (iOS does this
+// for every browser). The car keeps the last frame this long, so going back to the tab continues the mirroring.
+const RECONNECT_GRACE_MS = 20000;
 
 /**
  * Screen mirroring from a phone or laptop browser to the car.
@@ -7,7 +10,7 @@ const ICE_GATHER_TIMEOUT_MS = 4000;
  * Signaling uses the HTTP relay (one offer and one answer, with all ICE candidates gathered up front).
  * The car never plays the stream in <video>, which the car blocks while driving: video frames are read with
  * MediaStreamTrackProcessor and drawn on a canvas, audio goes to a plain <audio> element.
- * Phones cannot share their screen from a browser (no getDisplayMedia), so the sender side is desktop only.
+ * Phone browsers that cannot share their screen (no getDisplayMedia) pass the link on to a laptop instead.
  */
 export default class MirrorController {
   #app;
@@ -61,7 +64,7 @@ export default class MirrorController {
     this.#setPanelStatus("Device found. Connecting...");
 
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-    this.#receiver = { pc, stopRender: null };
+    this.#receiver = { pc, stopRender: null, graceTimer: null };
 
     pc.addEventListener("track", (event) => {
       if (event.track.kind === "video") this.#renderVideoTrack(event.track);
@@ -71,7 +74,21 @@ export default class MirrorController {
       }
     });
     pc.addEventListener("connectionstatechange", () => {
-      if (["failed", "closed", "disconnected"].includes(pc.connectionState)) {
+      const receiver = this.#receiver;
+      if (!receiver || receiver.pc !== pc) return;
+      if (pc.connectionState === "connected") {
+        clearTimeout(receiver.graceTimer);
+        receiver.graceTimer = null;
+        this.#setPaused(false);
+      } else if (pc.connectionState === "disconnected") {
+        // Often only a paused phone tab or a network blip: wait for it to come back before giving up.
+        this.#setPaused(true);
+        clearTimeout(receiver.graceTimer);
+        receiver.graceTimer = setTimeout(() => {
+          this.#setPanelStatus("Mirroring ended.");
+          this.#stopReceiver();
+        }, RECONNECT_GRACE_MS);
+      } else if (["failed", "closed"].includes(pc.connectionState)) {
         this.#setPanelStatus(pc.connectionState === "failed"
           ? "Connection failed. Both devices may be behind strict networks."
           : "Mirroring ended.");
@@ -139,12 +156,21 @@ export default class MirrorController {
       };
     }
     track.addEventListener("ended", () => this.#stopReceiver());
+    // A muted track sends no frames (the sending tab is hidden): the last frame stays with a note over it.
+    track.addEventListener("mute", () => this.#setPaused(true));
+    track.addEventListener("unmute", () => this.#setPaused(this.#receiver?.pc.connectionState === "disconnected"));
+  }
+
+  #setPaused(paused) {
+    this.#screen?.querySelector('[data-role="paused"]')?.classList.toggle("hidden", !paused);
   }
 
   #stopReceiver() {
     if (!this.#receiver) return;
-    const { pc, stopRender } = this.#receiver;
+    const { pc, stopRender, graceTimer } = this.#receiver;
     this.#receiver = null;
+    clearTimeout(graceTimer);
+    this.#setPaused(false);
     stopRender?.();
     pc.close();
     this.#audio.pause();
