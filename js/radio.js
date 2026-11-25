@@ -2,6 +2,23 @@
 const RADIO_API = "https://all.api.radio-browser.info/json";
 const LIST_QUERY = "order=clickcount&reverse=true&hidebroken=true&limit=60";
 
+// Stations missing from radio-browser.info. They only join search results that match their name: nothing is shown
+// or added to "My stations" without the user's search and tap.
+const EXTRA_STATIONS = Object.freeze([
+  ["Radio Yanosik '80s", "uwey4ye0gfcwv"],
+  ["Radio Yanosik '90s", "v4d29stdpbpwv"],
+  ["Radio Yanosik Rock", "whxxccsdp7uvv"],
+  ["Radio Yanosik EDM", "s4exa6c6y33vv"],
+  ["Radio Yanosik Love", "8fqn8rr6ktuvv"],
+  ["Radio Yanosik Road", "4r4nzs58rquvv"],
+  ["Radio Yanosik Classic", "vhxpw5w3rbpwv"],
+  ["Radio Yanosik Disco Polo", "4z2yaey3rbpwv"],
+  ["Radio Yanosik X-MAS", "b667d2c0qxcwv"],
+].map(([name, streamId]) => ({
+  stationuuid: `extra-${streamId}`, name, url_resolved: `https://stream.rcs.revma.com/${streamId}`,
+  countrycode: "PL", tags: "",
+})));
+
 /** Internet radio: station directory, favorites in localStorage and playback through a plain <audio> element. */
 export default class RadioController {
   #app;
@@ -122,11 +139,14 @@ export default class RadioController {
   async #search(query) {
     this.#view.setSection("results");
     this.#view.setStations("results", { loading: true });
+    const needle = query.toLowerCase();
+    const extras = EXTRA_STATIONS.filter((item) => item.name.toLowerCase().includes(needle)).map((item) => this.#normalize(item));
     try {
       const stations = await this.#fetchStations(`name=${encodeURIComponent(query)}`);
-      this.#view.setStations("results", { stations });
+      this.#view.setStations("results", { stations: [...stations, ...extras] });
     } catch (error) {
-      this.#view.setStations("results", { error: `Search failed (${error.message}).` });
+      if (extras.length) this.#view.setStations("results", { stations: extras });
+      else this.#view.setStations("results", { error: `Search failed (${error.message}).` });
     }
   }
 
