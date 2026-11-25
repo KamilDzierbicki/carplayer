@@ -4,11 +4,11 @@
  * Methods: setSection(name), setStations(section, {stations, loading, error}), setFavorites(stations),
  *          setNowPlaying(stationId)
  * Events: 'search' {query}, 'section-change' {section}, 'play-station' {station}, 'toggle-favorite' {station},
- *         'load-sample'
+ *         'open-add-station'
  */
 const SECTIONS = Object.freeze([
-  { id: "favorites", label: "Favorites" },
-  { id: "popular", label: "Popular in Poland" },
+  { id: "favorites", label: "My stations" },
+  { id: "popular", label: "Popular" },
   { id: "results", label: "Search results" },
 ]);
 
@@ -31,7 +31,10 @@ export default class CarplayerRadio extends HTMLElement {
             <input class="tab-search__input" name="radio_query" type="search" placeholder="Search radio stations by name" />
             <button class="btn btn--primary btn--compact" type="submit">Search</button>
           </form>
-          <button class="btn btn--ghost btn--compact" data-action="sample" type="button">Load sample</button>
+          <button class="btn btn--dark btn--compact" data-action="add-station" type="button">
+            <span class="icon icon--sm icon-mask icon-mask--plus" aria-hidden="true"></span>
+            Add station
+          </button>
         </div>
         <div class="chip-row" data-role="sections">
           ${SECTIONS.map((section) => `<button class="chip" type="button" data-section="${section.id}">${section.label}</button>`).join("")}
@@ -45,7 +48,9 @@ export default class CarplayerRadio extends HTMLElement {
       const query = event.target.elements.radio_query.value.trim();
       if (query) this.dispatchEvent(new CustomEvent("search", { detail: { query } }));
     });
-    this.querySelector('[data-action="sample"]').addEventListener("click", () => this.dispatchEvent(new CustomEvent("load-sample")));
+    this.querySelector('[data-action="add-station"]').addEventListener("click", () => {
+      this.dispatchEvent(new CustomEvent("open-add-station"));
+    });
     this.querySelector('[data-role="sections"]').addEventListener("click", (event) => {
       const chip = event.target.closest("[data-section]");
       if (!chip) return;
@@ -110,7 +115,7 @@ export default class CarplayerRadio extends HTMLElement {
       const message = document.createElement("div");
       message.className = error ? "text-error-state" : "text-empty-state";
       message.textContent = error || (this.#section === "favorites"
-        ? "No favorite stations yet. Tap the heart on any station, or use Load sample."
+        ? "No stations yet. Tap the heart on any station, or add your own with Add station."
         : "No stations found.");
       container.replaceChildren(message);
       return;
@@ -127,7 +132,7 @@ export default class CarplayerRadio extends HTMLElement {
     card.dataset.stationId = station.id;
     card.innerHTML = `
       <span class="station-card__logo"></span>
-      <span class="station-card__text">
+      <span class="station-card__text" role="button" tabindex="0">
         <span class="station-card__name"></span>
         <span class="station-card__meta"></span>
       </span>
@@ -137,14 +142,15 @@ export default class CarplayerRadio extends HTMLElement {
     `;
 
     const logo = card.querySelector(".station-card__logo");
+    logo.textContent = String(station.name).replace(/[^\p{L}\p{N} ]/gu, "").split(" ").filter(Boolean).slice(0, 2)
+      .map((part) => part[0]).join("").toUpperCase();
     if (station.favicon) {
       const img = document.createElement("img");
       img.src = station.favicon;
       img.alt = "";
       img.loading = "lazy";
       img.referrerPolicy = "no-referrer";
-      img.addEventListener("error", () => img.remove(), { once: true });
-      logo.appendChild(img);
+      img.addEventListener("load", () => logo.replaceChildren(img), { once: true });
     }
 
     card.querySelector(".station-card__name").textContent = station.name;

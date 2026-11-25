@@ -1,6 +1,8 @@
 const RELAY_API_BASE = `${window.location.origin}/api/relay`;
 // The production relay caps one payload at 4 KB, so bigger payloads (settings, WebRTC offers) travel in chunks.
 const RELAY_CHUNK_CHARS = 2500;
+const RELAY_MAX_CHUNKS = 64;
+const RELAY_MAX_PENDING_CHUNKED = 8;
 const BUILTIN_MOBILE_MODES = ["share", "settings", "linkshare", "captionshare"];
 
 export default class ShareController {
@@ -31,6 +33,20 @@ export default class ShareController {
 
     // Registered before any tab controller, so a tab that shows a QR code re-pins the relay after this runs.
     document.addEventListener("tab-change", () => this.releaseRelayQr());
+    // "Play link" sends a video to play here, "Open link" a web page to open here.
+    document.addEventListener("tab-change", (event) => {
+      if (this.isPhoneRelayMode()) return;
+      const tab = event.detail?.tab;
+      if (tab === "link") void this.showRelayQr(document.querySelector("carplayer-add-video-flow carplayer-setup-card")?.qrContainer, "share", 200);
+      if (tab === "open-link") void this.showRelayQr(document.getElementById("openLinkComponent")?.qrContainer, "linkshare", 200);
+    });
+    document.addEventListener("open-url", (event) => {
+      if (!this.#normalizeUrl(event.detail?.url)) {
+        alert("Enter a link that starts with http:// or https://");
+        return;
+      }
+      this.#handleIncomingRedirectUrl(event.detail.url);
+    });
   }
 
   setPlayerController(playerController) {
@@ -98,11 +114,15 @@ export default class ShareController {
 
     const poll = async () => {
       if (closed) return;
-      const messages = await this.#receiveRelayMessages(session);
-      messages.forEach((raw) => {
-        const payload = this.#reassembleChunk(raw, chunks);
-        if (payload) onPayload(payload);
-      });
+      try {
+        const messages = await this.#receiveRelayMessages(session);
+        messages.forEach((raw) => {
+          const payload = this.#reassembleChunk(raw, chunks);
+          if (payload) onPayload(payload);
+        });
+      } catch (error) {
+        console.warn("[relay] Reply poll failed", error);
+      }
       if (!closed) timer = setTimeout(() => void poll(), 1000);
     };
     timer = setTimeout(() => void poll(), 500);
@@ -137,41 +157,11 @@ export default class ShareController {
   }
 
   #bindShareButtons() {
-    const appNav = document.querySelector("carplayer-navbar");
-    if (appNav) {
-      appNav.addEventListener("action-send-link", () => {
-        this.#app.openModal("linkRelayModal");
-      });
-    }
-
     document.addEventListener("modal-open", (e) => {
       const modalId = e.target?.id;
       if (!modalId) return;
 
-      if (modalId === "linkRelayModal") {
-        void this.#resumeRelayPollingOrRender({
-          containerId: "linkRelayQrcode",
-          mode: "linkshare",
-          width: 250,
-          height: 250,
-        });
-      } else if (modalId === "urlModal") {
-        void this.#resumeRelayPollingOrRender({
-          containerId: "qrcode",
-          mode: "share",
-          width: 250,
-          height: 250,
-          flowContext: "carplayer-add-video-flow",
-        });
-      } else if (modalId === "settingsModal") {
-        void this.#resumeRelayPollingOrRender({
-          containerId: "settingsMobileQrcode",
-          mode: "settings",
-          width: 240,
-          height: 240,
-          flowContext: "carplayer-jellyfin-settings-form",
-        });
-      } else if (modalId === "captionsModal") {
+      if (modalId === "captionsModal") {
         void this.#resumeRelayPollingOrRender({
           containerId: "captionsRelayQrcode",
           mode: "captionshare",
@@ -411,7 +401,8 @@ export default class ShareController {
         apiKey: jfApiKey || this.#storage.getJellyfinApiKey(),
         userId: jfUserId || this.#storage.getJellyfinUserId(),
       });
-      alert("Jellyfin settings saved successfully!");
+      document.dispatchEvent(new CustomEvent("jellyfin-config-changed"));
+    alert("Jellyfin settings saved successfully!");
       window.history.replaceState({}, document.title, window.location.pathname);
       return;
     }
@@ -492,6 +483,9 @@ export default class ShareController {
       colorLight: "#ffffff",
       correctLevel: QRCode.CorrectLevel.H,
     });
+    qrContainer.querySelector("img")?.setAttribute("alt", "QR code to open this on your phone");
+    qrContainer.setAttribute("role", "img");
+    qrContainer.setAttribute("aria-label", "QR code to open this on your phone");
   }
 
   #buildRelayUrl(mode) {
@@ -636,7 +630,12 @@ export default class ShareController {
         this.#stopRelayPolling();
         return;
       } else {
-        await this.#pollRelayMessages(this.#relaySession);
+        try {
+          await this.#pollRelayMessages(this.#relaySession);
+        } catch (error) {
+          // One bad message or a network hiccup must not stop the car from listening to the phone.
+          console.warn("[relay] Poll failed", error);
+        }
       }
 
       this.#relayPollTimer = setTimeout(() => {
@@ -675,7 +674,7 @@ export default class ShareController {
       });
     } catch (error) {
       console.warn("[relay] Poll failed due to network error", error);
-      return;
+      return [];
     }
 
     if (response.status === 404 || response.status === 410) {
@@ -709,7 +708,11 @@ export default class ShareController {
 
     const { id, index, total, data } = payload;
     if (!id || !Number.isInteger(index) || !Number.isInteger(total)) return null;
+    // A relay payload is at most a few dozen chunks; anything else is malformed or hostile.
+    if (total < 1 || total > RELAY_MAX_CHUNKS || index < 0 || index >= total) return null;
+    if (!store.has(id) && store.size >= RELAY_MAX_PENDING_CHUNKED) store.delete(store.keys().next().value);
     const parts = store.get(id) || new Array(total).fill(null);
+    if (parts.length !== total) return null;
     parts[index] = String(data || "");
     store.set(id, parts);
     if (parts.some((part) => part === null)) return null;
@@ -907,6 +910,7 @@ export default class ShareController {
 
     this.#app.closeModal("mobileApiModal");
 
+    document.dispatchEvent(new CustomEvent("jellyfin-config-changed"));
     alert("Jellyfin settings saved successfully!");
   }
 
@@ -940,15 +944,16 @@ export default class ShareController {
     const raw = String(value || "").trim();
     if (!raw) return "";
 
+    // A real web address: http(s) and a host with a dot ("hello" would become https://hello/ and fail).
+    const accept = (parsed) => ["http:", "https:"].includes(parsed.protocol)
+      && (parsed.hostname.includes(".") || parsed.hostname === "localhost" || parsed.hostname.startsWith("["));
     try {
       const parsed = new URL(raw);
-      if (!["http:", "https:"].includes(parsed.protocol)) return "";
-      return parsed.href;
+      return accept(parsed) ? parsed.href : "";
     } catch (error) {
       try {
         const parsed = new URL(`https://${raw}`);
-        if (!["http:", "https:"].includes(parsed.protocol)) return "";
-        return parsed.href;
+        return accept(parsed) ? parsed.href : "";
       } catch (innerError) {
         return "";
       }

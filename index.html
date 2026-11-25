@@ -6,7 +6,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>CarPlayer - Watch Video</title>
   <meta name="description"
-    content="CarPlayer is a static web app that lets passengers watch videos in-car via direct links, and Jellyfin integration." />
+    content="CarPlayer lets passengers watch video links, IPTV, radio and their Jellyfin library in the car browser, with links sent from a phone by QR code." />
   <meta name="keywords"
     content="CarPlayer, in-car video player, Tesla browser video, Jellyfin player, MP4 player, WebCodecs, passenger entertainment" />
   <meta name="robots" content="index, follow" />
@@ -15,45 +15,59 @@
   <meta property="og:site_name" content="CarPlayer" />
   <meta property="og:title" content="CarPlayer - Watch Video in Your Car Browser" />
   <meta property="og:description"
-    content="Play MP4 and Jellyfin videos in-car, QR sharing from phone, and playback resume history." />
+    content="Video links, IPTV with a TV guide, radio and Jellyfin for passengers in the car browser. Send links from your phone with a QR code." />
   <meta property="og:url" content="https://carplayer.oxyconit.com/" />
-  <meta property="og:image" content="https://carplayer.oxyconit.com/demo2.png" />
+  <meta property="og:image" content="https://carplayer.oxyconit.com/icons/og-image.jpg" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
   <meta property="og:image:alt" content="CarPlayer interface screenshot" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="CarPlayer - Watch Video in Your Car Browser" />
   <meta name="twitter:description"
-    content="Static web player with direct links, Jellyfin search, QR phone relay, and canvas playback optimized for in-car browsers." />
-  <meta name="twitter:image" content="https://carplayer.oxyconit.com/demo2.png" />
+    content="Video links, IPTV with a TV guide, radio and Jellyfin for passengers in the car browser. Send links from your phone with a QR code." />
+  <meta name="twitter:image" content="https://carplayer.oxyconit.com/icons/og-image.jpg" />
   <meta name="theme-color" content="#101216" />
-  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer
+    integrity="sha384-3zSEDfvllQohrq0PHL1fOXJuC/jSOO34H46t6UQfobFOmxE5BpjjaIJY5F2/bMnU" crossorigin="anonymous"></script>
   <link rel="stylesheet" href="style.css" />
   <link rel="icon" href="icons/favicon.svg" type="image/svg+xml" />
 </head>
 
 <body>
   <div id="setupScreen">
-    <carplayer-navbar></carplayer-navbar>
 
     <main class="tab-panels">
       <section class="tab-panel" data-tab-panel="dashboard" aria-label="Dashboard">
         <div class="tab-heading">
-          <h2 class="tab-heading__title">Dashboard</h2>
+          <a href="./" class="app-brand dashboard-brand" aria-label="CarPlayer, reload">
+            <img class="icon icon--md" src="icons/favicon.svg" alt="" />
+            <span class="dashboard-brand__name">CarPlayer</span>
+          </a>
           <button class="btn btn--dark btn--compact" id="btnEditWidgets" type="button">
             <span class="icon icon--sm icon-mask icon-mask--tune" aria-hidden="true"></span>
             Edit widgets
           </button>
+          <span class="dashboard-edit-actions hidden" id="dashboardEditActions">
+            <button class="btn btn--dark btn--compact" id="btnAddWidget" type="button">
+              <span class="icon icon--sm icon-mask icon-mask--plus" aria-hidden="true"></span>
+              Add widget
+            </button>
+            <button class="btn btn--primary btn--compact" id="btnWidgetsDone" type="button">Done</button>
+          </span>
         </div>
         <div class="widget-grid" id="dashboardGrid"></div>
       </section>
 
       <section class="tab-panel hidden" data-tab-panel="history" aria-label="History">
         <carplayer-history id="historyComponent"></carplayer-history>
-        <carplayer-jellyfin-search-results id="jellyfinSearchComponent" class="hidden"></carplayer-jellyfin-search-results>
       </section>
 
-      <section class="tab-panel hidden" data-tab-panel="youtube" aria-label="YouTube">
-        <carplayer-youtube id="youtubeComponent"></carplayer-youtube>
+      <section class="tab-panel hidden" data-tab-panel="jellyfin" aria-label="Jellyfin">
+        <carplayer-jellyfin id="jellyfinComponent"></carplayer-jellyfin>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="tube" aria-label="Tube">
+        <carplayer-tube id="tubeComponent"></carplayer-tube>
       </section>
 
       <section class="tab-panel hidden" data-tab-panel="iptv" aria-label="IPTV">
@@ -65,32 +79,45 @@
       </section>
 
       <section class="tab-panel hidden" data-tab-panel="link" aria-label="Open video via link">
-        <div class="link-panel">
-          <h2 class="tab-heading__title">Open video via link</h2>
-          <carplayer-add-video-flow></carplayer-add-video-flow>
-        </div>
+        <carplayer-add-video-flow></carplayer-add-video-flow>
+      </section>
+
+      <section class="tab-panel hidden" data-tab-panel="open-link" aria-label="Open a web page">
+        <carplayer-open-link id="openLinkComponent"></carplayer-open-link>
       </section>
 
       <section class="tab-panel hidden" data-tab-panel="mirror" aria-label="Screen mirroring">
         <div class="setup-card mirror-panel" id="mirrorPanel">
           <header class="setup-card__header">
-            <h2 class="setup-card__title">Mirror a laptop screen</h2>
-            <p class="section-note">Show your laptop screen on the car display. The picture is drawn on a canvas, the same way as videos. Phones cannot share their screen from a browser.</p>
+            <span class="setup-card__badge"><span class="icon icon-mask icon-mask--cast" aria-hidden="true"></span></span>
+            <div class="setup-card__heading">
+              <h2 class="setup-card__title">Mirror a laptop screen</h2>
+              <p class="setup-card__note" data-role="status">Waiting for a laptop...</p>
+            </div>
           </header>
           <div class="setup-card__body">
-            <div class="qr-card setup-card__qr" data-role="qr"></div>
-            <carplayer-step-list title="How to start:">
-              <carplayer-step-item number="1"><p>Scan this QR code, or open its link on your laptop (Chrome, Edge or Firefox).</p></carplayer-step-item>
-              <carplayer-step-item number="2"><p>Click "Share my screen" and pick a screen, window or tab.</p></carplayer-step-item>
-              <carplayer-step-item number="3"><p>The picture appears here. Tab audio is sent too when the browser allows it.</p></carplayer-step-item>
-            </carplayer-step-list>
+            <div class="setup-card__panel setup-card__phone">
+              <span class="setup-card__eyebrow">Open on your laptop</span>
+              <div class="qr-card setup-card__qr" data-role="qr"></div>
+            </div>
+            <div class="setup-card__divider" aria-hidden="true"><span>then</span></div>
+            <div class="setup-card__panel">
+              <span class="setup-card__eyebrow">How it works</span>
+              <ol class="setup-card__steps">
+                <li>Scan the QR code, or open its link on a laptop with Chrome, Edge or Firefox.</li>
+                <li>Click "Share my screen" and pick a screen, window or tab.</li>
+                <li>The picture appears here, drawn on a canvas like every video. Tab audio comes along when the browser allows it.</li>
+              </ol>
+              <ul class="setup-facts">
+                <li>Phones cannot share their screen from a browser. A phone can pass the link on to a laptop.</li>
+                <li>The link is valid for a few minutes; the QR code renews itself.</li>
+              </ul>
+            </div>
           </div>
-          <p class="section-note" data-role="status">Waiting for a laptop...</p>
         </div>
       </section>
     </main>
 
-    <carplayer-footer></carplayer-footer>
     <div class="app-bottom">
       <carplayer-radio-bar id="radioBar"></carplayer-radio-bar>
       <carplayer-dock id="appDock"></carplayer-dock>
@@ -105,12 +132,59 @@
     </button>
   </div>
 
-  <carplayer-modal id="settingsModal" modal-title="Settings" variant="settings">
-    <carplayer-jellyfin-settings-form></carplayer-jellyfin-settings-form>
-    <button class="btn btn--secondary btn--block" id="btnOpenTransfer" type="button">
-      <span class="icon icon--sm icon-mask icon-mask--transfer" aria-hidden="true"></span>
-      Export or import settings with a phone
-    </button>
+  <carplayer-modal id="settingsModal" modal-title="" aria-label="About" variant="settings">
+    <div class="about">
+      <header class="about__hero">
+        <img class="about__logo" src="icons/favicon.svg" alt="" />
+        <div class="about__hero-text">
+          <h2 class="about__name">CarPlayer</h2>
+          <p class="about__tagline">Video, TV and radio for passengers that keeps playing while you drive.</p>
+        </div>
+      </header>
+
+      <div class="about__group">
+        <button class="about__row" id="btnOpenTransfer" type="button">
+          <span class="about__row-icon"><span class="icon icon--md icon-mask icon-mask--transfer" aria-hidden="true"></span></span>
+          <span class="about__row-text">
+            <span class="about__row-title">Move settings</span>
+            <span class="about__row-note">Copy settings to a phone, or bring them from one. History stays here.</span>
+          </span>
+          <span class="about__chevron icon icon--sm icon-mask icon-mask--back" aria-hidden="true"></span>
+        </button>
+      </div>
+
+      <section class="about__section" aria-labelledby="termsTitle">
+        <h3 class="about__section-title" id="termsTitle">Terms</h3>
+        <div class="about__group">
+          <div class="about__row about__row--static">
+            <span class="about__row-text">
+              <span class="about__row-title">Your data stays in this browser</span>
+              <span class="about__row-note">CarPlayer stores nothing on its server. Settings, history, keys and tokens stay here. The relay only passes short messages from your phone, in memory, for up to 3 minutes.</span>
+            </span>
+          </div>
+          <div class="about__row about__row--static">
+            <span class="about__row-text">
+              <span class="about__row-title">You bring the sources</span>
+              <span class="about__row-note">Video links, Jellyfin, IPTV lists, radio links and the proxy come from you. You are responsible for having the right to watch them.</span>
+            </span>
+          </div>
+          <div class="about__row about__row--static">
+            <span class="about__row-text">
+              <span class="about__row-title">For passengers only</span>
+              <span class="about__row-note">The driver must not watch video while driving.</span>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="about__footer">
+        <a class="about__github" href="https://github.com/KamilDzierbicki/carplayer" target="_blank" rel="noopener noreferrer"
+          title="Source code on GitHub" aria-label="Source code on GitHub">
+          <span class="icon icon--md icon-mask icon-mask--github" aria-hidden="true"></span>
+        </a>
+        <span>Made with &lt;3 from Poland by kamilmlody5</span>
+      </footer>
+    </div>
   </carplayer-modal>
 
   <carplayer-modal id="widgetsModal" modal-title="Widgets" variant="settings">
@@ -135,7 +209,7 @@
 
   <carplayer-modal id="settingsSenderModal" modal-title="Send Settings to Car">
     <p class="section-note section-note--center">
-      Sends the settings saved on this phone (Jellyfin, YouTube proxy, IPTV, radio favorites, widgets) to the car.
+      Sends the settings saved on this phone (Jellyfin, Tube proxy, IPTV, radio favorites, widgets) to the car.
     </p>
     <button class="btn btn--primary btn--share btn--block" id="btnSendSettingsToCar" type="button">
       <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
@@ -143,12 +217,45 @@
     </button>
   </carplayer-modal>
 
-  <carplayer-modal id="mobileYoutubeModal" modal-title="Send YouTube Proxy to Car">
-    <p class="section-note section-note--center">Paste the address of your CORS proxy for YouTube (for example https://proxy.example/?url={url}).</p>
-    <carplayer-clearable-input id="mobileYoutubeProxyInput" type="text" placeholder="https://proxy.example/?url={url}"
+  <carplayer-modal id="addStationModal" variant="settings" aria-label="Add a radio station">
+    <carplayer-setup-card heading="Add a radio station" icon="radio"
+      note="Any internet radio stream link works, as long as it is HTTPS."
+      phone-step='Paste the station name and link, then tap "Send to Car".'>
+      <label class="field-label">Station name
+        <carplayer-clearable-input id="addStationName" type="text" placeholder="My radio" class="field field--url"></carplayer-clearable-input>
+      </label>
+      <label class="field-label">Stream link
+        <carplayer-clearable-input id="addStationUrl" type="url" placeholder="https://stream.example/radio.mp3" class="field field--url"></carplayer-clearable-input>
+      </label>
+      <div class="button-row">
+        <button class="btn btn--primary" id="btnAddStation" type="button">Add and play</button>
+      </div>
+      <ul class="setup-facts">
+        <li>Plain HTTP streams are blocked on this HTTPS page.</li>
+        <li>The station is saved in My stations.</li>
+      </ul>
+    </carplayer-setup-card>
+  </carplayer-modal>
+
+  <carplayer-modal id="mobileRadioModal" modal-title="Send Radio Station to Car">
+    <p class="section-note section-note--center">Paste the station name and its stream link.</p>
+    <carplayer-clearable-input id="mobileRadioNameInput" type="text" placeholder="My radio" class="field field--url">
+    </carplayer-clearable-input>
+    <carplayer-clearable-input id="mobileRadioUrlInput" type="url" placeholder="https://stream.example/radio.mp3"
       class="field field--url">
     </carplayer-clearable-input>
-    <button class="btn btn--primary btn--share btn--block" id="btnSendYoutubeConfig" type="button">
+    <button class="btn btn--primary btn--share btn--block" id="btnSendRadioStation" type="button">
+      <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
+      Send to Car
+    </button>
+  </carplayer-modal>
+
+  <carplayer-modal id="mobileTubeModal" modal-title="Send Tube Proxy to Car">
+    <p class="section-note section-note--center">Paste the address of your CORS proxy for Tube (for example https://proxy.example/?url={url}).</p>
+    <carplayer-clearable-input id="mobileTubeProxyInput" type="text" placeholder="https://proxy.example/?url={url}"
+      class="field field--url">
+    </carplayer-clearable-input>
+    <button class="btn btn--primary btn--share btn--block" id="btnSendTubeConfig" type="button">
       <span class="icon icon--md icon--ink icon-mask icon-mask--share" aria-hidden="true"></span>
       Send to Car
     </button>
@@ -213,15 +320,11 @@
     </button>
   </carplayer-modal>
 
-  <carplayer-modal id="linkRelayModal" modal-title="Send Link to Car">
-    <carplayer-link-relay-flow></carplayer-link-relay-flow>
-  </carplayer-modal>
-
   <carplayer-modal id="teslaFullscreenModal" modal-title="Going Fullscreen">
     <p class="section-note">
-      To achieve true full-screen mode on a Tesla display, you will be redirected via YouTube. Make sure you are in <b>park mode</b> for it to work.
+      To achieve true full-screen mode on a Tesla display, you will be sent through a redirect page. Make sure you are in <b>park mode</b> for it to work.
       <br>
-      When you see the YouTube redirect page, simply tap <b>'Go to Site'</b> on the screen.
+      When you see the redirect page, simply tap <b>'Go to Site'</b> on the screen.
     </p>
     <button class="btn btn--primary btn--share btn--block" id="btnConfirmFullscreenRedirect" type="button">
       <span class="icon icon--md icon--ink icon-mask icon-mask--fullscreen" aria-hidden="true"></span>
@@ -260,7 +363,7 @@
   </carplayer-modal>
 
   <carplayer-modal id="historyShareLinkModal" modal-title="Video Link">
-    <carplayer-clearable-input id="historyShareLinkInput" type="url" readonly class="field field--url">
+    <carplayer-clearable-input id="historyShareLinkInput" type="url" readonly class="field field--url" aria-label="Video link">
     </carplayer-clearable-input>
     <button class="btn btn--secondary btn--block" id="btnCopyHistoryShareLink" type="button">
       Copy link
@@ -275,6 +378,19 @@
     <carplayer-video-controls id="videoControls"></carplayer-video-controls>
   </div>
 
+  <!-- One shared Mediabunny instance: the AC-3 plugin imports "mediabunny" and must register into the same copy.
+       Both are the packages' own prebuilt files (immutable for a pinned version), checked by integrity hash. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "mediabunny": "https://cdn.jsdelivr.net/npm/mediabunny@1.66.2/dist/bundles/mediabunny.min.mjs"
+      },
+      "integrity": {
+        "https://cdn.jsdelivr.net/npm/mediabunny@1.66.2/dist/bundles/mediabunny.min.mjs": "sha384-LZayZH9/CcTPIfMFLGcfpEnfltYMxlTSv95i6NhjI3Jg7HRYMu7gTz/ONEQxmcRl",
+        "https://cdn.jsdelivr.net/npm/@mediabunny/ac3@1.66.2/dist/bundles/mediabunny-ac3.min.mjs": "sha384-JfWI7ZBBdtIkhqIpnCLr3UG6n4b/aOa9Fo8bLacbG6hOZDRIJorFK2P5DbOYt0cr"
+      }
+    }
+  </script>
   <script type="module" src="js/main.js"></script>
 </body>
 

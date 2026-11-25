@@ -1,7 +1,7 @@
 export default class CarPlayerCore {
 	#dom;
 	#state;
-	#youtubeRegex;
+	#tubeLinkRegex;
 
 	constructor() {
 		const mediaView = document.getElementById("mediaView");
@@ -10,7 +10,6 @@ export default class CarPlayerCore {
 			setupScreen: document.getElementById("setupScreen"),
 			playerScreen: document.getElementById("playerScreen"),
 			urlInput: document.getElementById("videoUrl"),
-			searchInput: document.getElementById("searchInput"),
 			btnLoad: document.getElementById("btnLoad"),
 			loader: mediaView ? mediaView.loader : null,
 			videoControls: document.getElementById("videoControls"),
@@ -41,7 +40,7 @@ export default class CarPlayerCore {
 			clickTimeout: null,
 		};
 
-		this.#youtubeRegex =
+		this.#tubeLinkRegex =
 			/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/;
 	}
 
@@ -53,8 +52,8 @@ export default class CarPlayerCore {
 		return this.#state;
 	}
 
-	get youtubeRegex() {
-		return this.#youtubeRegex;
+	get tubeLinkRegex() {
+		return this.#tubeLinkRegex;
 	}
 
 	openModal(id) {

@@ -9,31 +9,25 @@ export default class CarplayerAddVideoFlow extends HTMLElement {
   }
 
   #render() {
+    // Same setup card as the Tube and IPTV tabs: link form on the left, phone QR code on the right.
     this.innerHTML = `
-      <div class="qr-flow">
-        <div class="qr-card" id="qrcode"></div>
-        <carplayer-step-list title="How to send link via phone:">
-          <carplayer-step-item number="1">
-            <p>Scan this QR code with your phone.</p>
-          </carplayer-step-item>
-          <carplayer-step-item number="2">
-            <p>Paste your video link on your phone.</p>
-          </carplayer-step-item>
-          <carplayer-step-item number="3">
-            <p>Tap "Send to Car" - it will play right here!</p>
-          </carplayer-step-item>
-        </carplayer-step-list>
-      </div>
-
-      <carplayer-clearable-input id="videoUrl" type="url"
-        placeholder="Video URL with valid CORS origin (.mp4 / Jellyfin or Plex stream link)" class="field field--url">
-      </carplayer-clearable-input>
-      <button class="btn btn--primary btn--block is-disabled" id="btnLoad" type="button">
-        Play
-      </button>
-      <button class="btn btn--ghost btn--block" id="btnPlaySample" type="button">
-        Or Play Sample Video
-      </button>
+      <carplayer-setup-card heading="Open a video" icon="link"
+        note="Play a direct video link here, or send one from your phone."
+        phone-step='Paste your video link and tap "Send to Car". It plays right here.'>
+        <label class="field-label">Video link
+          <carplayer-clearable-input id="videoUrl" type="url"
+            placeholder="https://example.com/movie.mp4" class="field field--url">
+          </carplayer-clearable-input>
+        </label>
+        <div class="button-row button-row--stack">
+          <button class="btn btn--primary is-disabled" id="btnLoad" type="button">Play</button>
+          <button class="btn btn--ghost" id="btnPlaySample" type="button">Play sample video</button>
+        </div>
+        <ul class="setup-facts">
+          <li>Works with .mp4, .webm and HLS (.m3u8) links, also live streams.</li>
+          <li>The server must allow CORS, as Jellyfin and Plex stream links do.</li>
+        </ul>
+      </carplayer-setup-card>
     `;
 
     this.dom = Object.fromEntries([...this.querySelectorAll('[id]')].map(el => [el.id, el]));

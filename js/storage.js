@@ -318,12 +318,12 @@ export default class StorageService {
     this.#historyRenderer?.render(filterQuery);
   }
 
-  getActiveTab() {
-    return localStorage.getItem("carplayer_active_tab") || "dashboard";
+  getTheme() {
+    return localStorage.getItem("carplayer_theme") === "light" ? "light" : "dark";
   }
 
-  saveActiveTab(tabId) {
-    localStorage.setItem("carplayer_active_tab", String(tabId || ""));
+  saveTheme(theme) {
+    localStorage.setItem("carplayer_theme", theme === "light" ? "light" : "dark");
   }
 
   getWidgetLayout() {
@@ -342,23 +342,16 @@ export default class StorageService {
     this.#writeJson("carplayer_todos", todos);
   }
 
-  getWeatherLocation() {
-    return this.#readJson("carplayer_weather_location", null);
-  }
-
-  saveWeatherLocation(location) {
-    this.#writeJson("carplayer_weather_location", location);
-  }
-
-  getYoutubeConfig() {
+  getTubeConfig() {
     return {
       proxyUrl: "",
-      ...this.#readJson("carplayer_youtube", {}),
+      // carplayer_youtube is where the config lived before the rename.
+      ...(this.#readJson("carplayer_tube", null) || this.#readJson("carplayer_youtube", {})),
     };
   }
 
-  saveYoutubeConfig(config) {
-    this.#writeJson("carplayer_youtube", config);
+  saveTubeConfig(config) {
+    this.#writeJson("carplayer_tube", config);
   }
 
   getIptvConfig() {
@@ -372,6 +365,67 @@ export default class StorageService {
 
   saveIptvConfig(config) {
     this.#writeJson("carplayer_iptv", config);
+  }
+
+  /**
+   * True once if an earlier version auto-added default stations to the favorites; clears the marker.
+   */
+  takeRadioDefaultsFlag() {
+    const keys = ["carplayer_radio_defaults_version", "carplayer_radio_defaults_v1"];
+    const wasSet = keys.some((key) => localStorage.getItem(key) !== null);
+    keys.forEach((key) => localStorage.removeItem(key));
+    return wasSet;
+  }
+
+  /**
+   * Favorite IPTV channels: { key, name, url, logo }, key from channelFavoriteKey() (tvg-id, or the name).
+   * The stream link is kept so the dashboard can play a channel without loading the playlist. Older versions
+   * stored only the key; such entries get their link the next time the playlist loads.
+   */
+  getIptvFavorites() {
+    const stored = this.#readJson("carplayer_iptv_favorites", []);
+    if (!Array.isArray(stored)) return [];
+    return stored
+      .map((entry) => (typeof entry === "string" ? { key: entry, name: entry, url: "", logo: "" } : entry))
+      .filter((entry) => entry && typeof entry.key === "string" && entry.key);
+  }
+
+  saveIptvFavorites(favorites) {
+    this.#writeJson("carplayer_iptv_favorites", favorites);
+  }
+
+  /**
+   * Videos saved with the heart in the player: { id, title, sourceType, thumbnailUrl }, newest first. The id is the
+   * history id (link, Tube watch link or jellyfin-item://), so the dashboard plays it the way history does.
+   * Captured frame thumbnails are not copied: they are large and settings export sends every saved key.
+   */
+  getVideoFavorites() {
+    const stored = this.#readJson("carplayer_video_favorites", []);
+    return Array.isArray(stored) ? stored.filter((entry) => entry && typeof entry.id === "string" && entry.id) : [];
+  }
+
+  isVideoFavorite(url) {
+    const id = this.extractId(url);
+    return Boolean(id) && this.getVideoFavorites().some((entry) => entry.id === id);
+  }
+
+  /** Adds or removes a video; returns true when it is a favorite afterwards. */
+  toggleVideoFavorite(url, { title = "" } = {}) {
+    const id = this.extractId(url);
+    if (!id) return false;
+    const favorites = this.getVideoFavorites();
+    if (favorites.some((entry) => entry.id === id)) {
+      this.#writeJson("carplayer_video_favorites", favorites.filter((entry) => entry.id !== id));
+      return false;
+    }
+    const historyItem = this.getHistory().find((entry) => entry.id === id);
+    this.#writeJson("carplayer_video_favorites", [{
+      id,
+      title: historyItem?.title || title || this.#app.getVideoTitleFromUrl(id),
+      sourceType: historyItem?.sourceType || this.#getSourceTypeFromId(id),
+      thumbnailUrl: historyItem?.thumbnailUrl || "",
+    }, ...favorites]);
+    return true;
   }
 
   getRadioFavorites() {

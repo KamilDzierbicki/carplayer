@@ -1,8 +1,9 @@
 /**
- * <carplayer-setup-card> - "configure manually or send from phone" card used by tabs that need settings first.
+ * <carplayer-setup-card> - "type it here or send it from your phone" card used by tabs that need settings first.
  *
- * Attributes: heading, note, phone-step (text of the phone instruction)
- * Children: form fields and buttons, moved into the manual column.
+ * Attributes: heading, note, icon (icon-mask name), phone-step (text of the phone instruction)
+ * Children: form fields and buttons, moved into the manual panel. A child `<ul class="setup-facts">`
+ *           is shown under them as short hints.
  * Property: qrContainer - element where the phone relay QR code is rendered.
  */
 export default class CarplayerSetupCard extends HTMLElement {
@@ -16,17 +17,22 @@ export default class CarplayerSetupCard extends HTMLElement {
     this.innerHTML = `
       <section class="setup-card">
         <header class="setup-card__header">
-          <h2 class="setup-card__title"></h2>
-          <p class="section-note setup-card__note"></p>
+          <span class="setup-card__badge"><span class="icon icon-mask" aria-hidden="true"></span></span>
+          <div class="setup-card__heading">
+            <h2 class="setup-card__title"></h2>
+            <p class="setup-card__note"></p>
+          </div>
         </header>
         <div class="setup-card__body">
-          <div class="setup-card__manual"></div>
-          <div class="setup-card__phone">
+          <div class="setup-card__panel setup-card__manual"></div>
+          <div class="setup-card__divider" aria-hidden="true"><span>or</span></div>
+          <div class="setup-card__panel setup-card__phone">
+            <span class="setup-card__eyebrow">Send it from your phone</span>
             <div class="qr-card setup-card__qr" data-role="qr"></div>
-            <carplayer-step-list title="Or send it from your phone:">
-              <carplayer-step-item number="1"><p>Scan this QR code with your phone.</p></carplayer-step-item>
-              <carplayer-step-item number="2"><p class="setup-card__phone-step"></p></carplayer-step-item>
-            </carplayer-step-list>
+            <ol class="setup-card__steps">
+              <li>Scan this QR code with your phone camera.</li>
+              <li class="setup-card__phone-step"></li>
+            </ol>
           </div>
         </div>
       </section>
@@ -36,6 +42,7 @@ export default class CarplayerSetupCard extends HTMLElement {
     const note = this.querySelector(".setup-card__note");
     note.textContent = this.getAttribute("note") || "";
     note.hidden = !note.textContent;
+    this.querySelector(".setup-card__badge .icon").classList.add(`icon-mask--${this.getAttribute("icon") || "settings"}`);
     this.querySelector(".setup-card__phone-step").textContent =
       this.getAttribute("phone-step") || 'Paste the value and tap "Send to Car".';
 

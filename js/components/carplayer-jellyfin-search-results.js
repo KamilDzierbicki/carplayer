@@ -92,8 +92,8 @@ class CarplayerJellyfinSearchResults extends HTMLElement {
             </div>
             <div id="resultsContainer" class="video-grid">
                 ${loading ? '<div class="loader is-visible" aria-hidden="true" style="margin: 20px auto;"></div>' : ''}
-                ${error ? `<div class="text-empty-state">Search failed: ${error}</div>` : ''}
-                ${!loading && !error && results.length === 0 && query ? `<div class="text-empty-state">No results found for "${query}".</div>` : ''}
+                ${error ? `<div class="text-empty-state">Search failed: ${escapeHtml(error)}</div>` : ''}
+                ${!loading && !error && results.length === 0 && query ? `<div class="text-empty-state">No results found for "${escapeHtml(query)}".</div>` : ''}
             </div>
         `;
 
@@ -124,3 +124,11 @@ class CarplayerJellyfinSearchResults extends HTMLElement {
 }
 
 customElements.define("carplayer-jellyfin-search-results", CarplayerJellyfinSearchResults);
+
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}

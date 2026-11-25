@@ -6,10 +6,10 @@ export default class CarplayerVolumeControl extends HTMLElement {
         super();
         this.innerHTML = `
             <div class="volume-control">
-                <button class="icon-btn icon-btn--control icon-btn--small" id="muteBtn" type="button">
+                <button class="icon-btn icon-btn--control icon-btn--small" id="muteBtn" type="button" aria-label="Mute">
                     <span class="icon icon--md icon-mask icon-mask--volume" aria-hidden="true"></span>
                 </button>
-                <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1" step="0.01" value="1" />
+                <input type="range" class="volume-slider" id="volumeSlider" min="0" max="1" step="0.01" value="1" aria-label="Volume" />
             </div>
         `;
 
@@ -47,6 +47,7 @@ export default class CarplayerVolumeControl extends HTMLElement {
         this.volumeSlider.value = String(vol);
 
         const isMuted = vol === 0;
+        this.muteBtn.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
         this.iconSpan.className = isMuted
             ? 'icon icon--md icon-mask icon-mask--volume-mute'
             : 'icon icon--md icon-mask icon-mask--volume';

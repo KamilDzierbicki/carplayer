@@ -152,6 +152,27 @@ export default class CarplayerCustomSelect extends HTMLElement {
             if (this.#s.isOpen) { this.#close(); } else { this.#open(); }
         });
 
+        // Keyboard: Enter or Space opens and closes the list, arrows step through the options, Escape closes.
+        this.setAttribute('role', 'combobox');
+        this.setAttribute('aria-expanded', 'false');
+        if (title) this.setAttribute('aria-label', title);
+        this.addEventListener('keydown', (e) => {
+            const { options, value, isOpen } = this.#s;
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                if (isOpen) this.#close(); else this.#open();
+            } else if (e.key === 'Escape' && isOpen) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.#close();
+            } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                const index = options.findIndex(o => o.value === value);
+                const next = options[Math.min(options.length - 1, Math.max(0, index + (e.key === 'ArrowDown' ? 1 : -1)))];
+                if (next && next.value !== value) this.#select(next.value);
+            }
+        });
+
         this.dom.optionsEl.addEventListener('click', (e) => {
             e.stopPropagation();
             const opt = e.target.closest('.custom-select__option');
@@ -181,11 +202,14 @@ export default class CarplayerCustomSelect extends HTMLElement {
     #renderOptions() {
         if (!this.dom?.optionsEl) return;
 
-        this.dom.optionsEl.innerHTML = this.#s.options.map(opt => `
-            <div class="custom-select__option ${opt.value === this.#s.value ? 'is-selected' : ''}" data-value="${opt.value}">
-                ${opt.label}
-            </div>
-        `).join('');
+        // Labels can come from media files and caption URLs, so they are set as text, never as HTML.
+        this.dom.optionsEl.replaceChildren(...this.#s.options.map(opt => {
+            const option = document.createElement('div');
+            option.className = `custom-select__option${opt.value === this.#s.value ? ' is-selected' : ''}`;
+            option.dataset.value = opt.value;
+            option.textContent = opt.label;
+            return option;
+        }));
     }
 
     #syncSelection() {
@@ -232,11 +256,13 @@ export default class CarplayerCustomSelect extends HTMLElement {
 
         this.#s.isOpen = true;
         this.classList.add('is-open');
+        this.setAttribute('aria-expanded', 'true');
     }
 
     #close() {
         this.#s.isOpen = false;
         this.classList.remove('is-open');
+        this.setAttribute('aria-expanded', 'false');
     }
 
     #onOutsideClick(e) {

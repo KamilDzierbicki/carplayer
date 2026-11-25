@@ -7,8 +7,6 @@ export default class JellyfinService {
     constructor(app, storage) {
         this.#app = app;
         this.#storage = storage;
-
-        this.#bindEvents();
     }
 
     setSettingsController(settingsController) {
@@ -28,8 +26,9 @@ export default class JellyfinService {
         }
 
         if (!targetServer || !this.#storage.getJellyfinApiKey()) {
-            alert("Please configure your Jellyfin settings first.");
-            this.#settingsController?.openModal();
+            alert("Please connect your Jellyfin server first.");
+            // The server, codec and buffer are set up in the Jellyfin tab.
+            document.dispatchEvent(new CustomEvent("request-tab", { detail: { tab: "jellyfin" } }));
             return;
         }
 
@@ -107,73 +106,6 @@ export default class JellyfinService {
         }
         return base;
     }
-
-    #bindEvents() {
-        const appNav = document.querySelector("carplayer-navbar");
-        if (appNav) {
-            appNav.addEventListener("search", (e) => {
-                const term = e.detail;
-                if (!term) {
-                    const historyTitleElement = document.getElementById("historyTitle");
-                    if (historyTitleElement) historyTitleElement.textContent = "Recently Played";
-                    if (this.#app.dom.historyComponent) {
-                        this.#app.dom.historyComponent.searchQuery = "";
-                    }
-                    this.#storage.renderHistory();
-                } else {
-                    this.#handleSearch(term);
-                }
-            });
-        }
-    }
-
-
-    async #handleSearch(query) {
-        const term = String(query || "").trim();
-        if (!term) return;
-
-        const serverUrl = this.#storage.getJellyfinServerUrl();
-        const apiKey = this.#storage.getJellyfinApiKey();
-
-        if (!serverUrl || !apiKey) {
-            this.#settingsController?.openModal();
-            return;
-        }
-
-        const historyComponent = this.#app.dom.historyComponent;
-        const searchComponent = this.#app.dom.jellyfinSearchComponent;
-
-        if (historyComponent && searchComponent) {
-            historyComponent.classList.add("hidden");
-            searchComponent.classList.remove("hidden");
-
-            searchComponent.setAttribute("server-url", serverUrl);
-            searchComponent.setAttribute("api-key", apiKey);
-            searchComponent.setAttribute("query", term);
-
-            // Listen for back event if not already listening
-            if (!searchComponent._backListenerAttached) {
-                searchComponent.addEventListener("back", () => this.#clearSearch());
-                searchComponent._backListenerAttached = true;
-            }
-        }
-    }
-
-    #clearSearch() {
-        const appNav = document.querySelector("carplayer-navbar");
-        if (appNav) appNav.clearSearch();
-
-        const historyComponent = this.#app.dom.historyComponent;
-        const searchComponent = this.#app.dom.jellyfinSearchComponent;
-
-        if (historyComponent && searchComponent) {
-            searchComponent.classList.add("hidden");
-            searchComponent.removeAttribute("query");
-            historyComponent.classList.remove("hidden");
-        }
-
-        this.#storage.renderHistory();
-    }
 }
 
 export const HLS_BITRATES = { 360: 1000000, 480: 2500000, 720: 5000000, 1080: 8000000 };
@@ -208,7 +140,7 @@ export class Jellyfin {
             .map(item => ({
                 id: item.Id, name: item.Name, year: item.ProductionYear, type: item.Type,
                 dateCreated: item.DateCreated || "",
-                thumb: `${this.#baseUrl}/Items/${item.Id}/Images/Primary?ApiKey=${this.#apiKey}`
+                thumb: `${this.#baseUrl}/Items/${encodeURIComponent(item.Id)}/Images/Primary?ApiKey=${encodeURIComponent(this.#apiKey)}`
             }))
             .sort((a, b) => (b.dateCreated || "").localeCompare(a.dateCreated || ""));
         return items;
@@ -244,7 +176,7 @@ export class Jellyfin {
             name: episodeLabel ? `${episodeLabel} - ${item.Name}` : item.Name,
             year: item.ProductionYear,
             type: item.Type,
-            thumb: `${this.#baseUrl}/Items/${item.Id}/Images/Primary?ApiKey=${this.#apiKey}&maxWidth=480`,
+            thumb: `${this.#baseUrl}/Items/${encodeURIComponent(item.Id)}/Images/Primary?ApiKey=${encodeURIComponent(this.#apiKey)}&maxWidth=480`,
         };
     }
     async getPlaybackInfo(itemId, options = {}) {

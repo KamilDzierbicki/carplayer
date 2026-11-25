@@ -12,7 +12,7 @@ export default class CarplayerVideoControls extends HTMLElement {
                     </svg>
                 </button>
 
-                <button class="icon-btn icon-btn--control" id="playPauseBtn" type="button">
+                <button class="icon-btn icon-btn--control" id="playPauseBtn" type="button" aria-label="Play">
                     <span id="iconPlay" class="icon icon--md icon-mask icon-mask--play" aria-hidden="true"></span>
                     <span id="iconPause" class="icon icon--md icon-mask icon-mask--pause hidden" aria-hidden="true"></span>
                 </button>
@@ -77,6 +77,10 @@ export default class CarplayerVideoControls extends HTMLElement {
                 </div>
 
                 <div class="player-tools">
+                    <button class="icon-btn icon-btn--control player-favorite" id="favoriteBtn" type="button"
+                        aria-pressed="false" aria-label="Add to favorites">
+                        <span class="icon icon--md icon-mask icon-mask--heart-outline" aria-hidden="true"></span>
+                    </button>
                     <carplayer-volume-control id="volumeControlWrapper"></carplayer-volume-control>
                 </div>
             </div>
@@ -88,6 +92,7 @@ export default class CarplayerVideoControls extends HTMLElement {
         this.iconPause = this.querySelector('#iconPause');
         this.skipBackBtn = this.querySelector('#skipBackBtn');
         this.skipFwdBtn = this.querySelector('#skipFwdBtn');
+        this.favoriteBtn = this.querySelector('#favoriteBtn');
 
         this.currentTimeDisplay = this.querySelector('#currentTimeDisplay');
         this.durationDisplay = this.querySelector('#durationDisplay');
@@ -113,6 +118,7 @@ export default class CarplayerVideoControls extends HTMLElement {
     }
 
     #renderPlayState() {
+        this.playPauseBtn.setAttribute('aria-label', this.#playing ? 'Pause' : 'Play');
         if (this.#playing) {
             this.playPauseBtn.classList.add('is-playing');
             this.iconPlay.classList.add('hidden');
@@ -140,9 +146,22 @@ export default class CarplayerVideoControls extends HTMLElement {
         this.skipFwdBtn.addEventListener('click', () => {
             this.dispatchEvent(new CustomEvent('action-skip', { detail: 10 }));
         });
+
+        this.favoriteBtn.addEventListener('click', () => {
+            this.dispatchEvent(new CustomEvent('action-favorite'));
+        });
     }
 
     // Methods to ease interaction from PlayerController
+    setFavorite(isFavorite) {
+        this.favoriteBtn.classList.toggle('is-active', isFavorite);
+        this.favoriteBtn.setAttribute('aria-pressed', String(isFavorite));
+        this.favoriteBtn.setAttribute('aria-label', isFavorite ? 'Remove from favorites' : 'Add to favorites');
+        const icon = this.favoriteBtn.querySelector('.icon');
+        icon.classList.toggle('icon-mask--heart', isFavorite);
+        icon.classList.toggle('icon-mask--heart-outline', !isFavorite);
+    }
+
     setIdle(idle) {
         if (idle) {
             this.controlsEl.classList.add('idle');

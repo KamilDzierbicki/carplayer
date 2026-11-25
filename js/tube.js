@@ -1,7 +1,7 @@
-import YouTubeProxyClient from "./youtube-proxy-client.js";
+import TubeClient from "./tube-client.js";
 
-/** YouTube tab: proxy configuration (manual or from phone), search and playback through the canvas player. */
-export default class YouTubeController {
+/** Tube tab: proxy configuration (manual or from phone), search and playback through the canvas player. */
+export default class TubeController {
   #app;
   #storage;
   #share;
@@ -14,16 +14,16 @@ export default class YouTubeController {
     this.#storage = storage;
     this.#share = share;
     this.#player = player;
-    this.#view = document.getElementById("youtubeComponent");
-    this.#client = new YouTubeProxyClient(this.#storage.getYoutubeConfig());
+    this.#view = document.getElementById("tubeComponent");
+    this.#client = new TubeClient(this.#storage.getTubeConfig());
 
-    this.#share.registerMobileMode("ytshare", "mobileYoutubeModal");
-    this.#share.registerPayloadHandler("youtube-config", (value) => this.#applyConfig(value, { fromPhone: true }));
+    this.#share.registerMobileMode("tubeshare", "mobileTubeModal");
+    this.#share.registerPayloadHandler("tube-config", (value) => this.#applyConfig(value, { fromPhone: true }));
     this.#bindEvents();
   }
 
   init() {
-    this.#view?.setConfig(this.#storage.getYoutubeConfig());
+    this.#view?.setConfig(this.#storage.getTubeConfig());
     this.#view?.showResults({});
   }
 
@@ -36,29 +36,32 @@ export default class YouTubeController {
     if (!this.#view) return;
 
     this.#view.addEventListener("save-config", (event) => this.#applyConfig(event.detail));
-    this.#view.addEventListener("search", (event) => void this.#search(event.detail.query));
-    this.#view.addEventListener("play-youtube", (event) => this.#play(event.detail.id, event.detail.title));
+    // Skips the native "search" event of <input type="search">, which bubbles here with no detail.
+    this.#view.addEventListener("search", (event) => {
+      if (event.detail?.query) void this.#search(event.detail.query);
+    });
+    this.#view.addEventListener("play-tube", (event) => this.#play(event.detail.id, event.detail.title));
     this.#view.addEventListener("view-change", () => this.#syncRelayQr());
     document.addEventListener("tab-change", () => this.#syncRelayQr());
 
-    document.getElementById("btnSendYoutubeConfig")?.addEventListener("click", async () => {
-      const input = document.getElementById("mobileYoutubeProxyInput");
+    document.getElementById("btnSendTubeConfig")?.addEventListener("click", async () => {
+      const input = document.getElementById("mobileTubeProxyInput");
       const proxyUrl = String(input?.value || "").trim();
       if (!proxyUrl) {
         alert("Paste the proxy address first.");
         return;
       }
-      if (await this.#share.sendPayloadToCar({ type: "youtube-config", value: { proxyUrl } })) {
-        this.#app.closeModal("mobileYoutubeModal");
+      if (await this.#share.sendPayloadToCar({ type: "tube-config", value: { proxyUrl } })) {
+        this.#app.closeModal("mobileTubeModal");
         alert("Proxy sent to the car.");
       }
     });
   }
 
   #syncRelayQr() {
-    const active = document.getElementById("appDock")?.getAttribute("active") === "youtube";
+    const active = document.getElementById("appDock")?.getAttribute("active") === "tube";
     if (active && this.#view?.isSetupVisible && !this.#share.isPhoneRelayMode()) {
-      void this.#share.showRelayQr(this.#view.qrContainer, "ytshare", 200);
+      void this.#share.showRelayQr(this.#view.qrContainer, "tubeshare", 200);
     }
   }
 
@@ -69,16 +72,16 @@ export default class YouTubeController {
       return;
     }
 
-    this.#storage.saveYoutubeConfig(config);
-    this.#client = new YouTubeProxyClient(config);
+    this.#storage.saveTubeConfig(config);
+    this.#client = new TubeClient(config);
     this.#view?.setConfig(config);
     if (options.fromPhone) {
-      document.dispatchEvent(new CustomEvent("request-tab", { detail: { tab: "youtube" } }));
+      document.dispatchEvent(new CustomEvent("request-tab", { detail: { tab: "tube" } }));
     }
   }
 
   async #search(query) {
-    const pastedId = query.match(this.#app.youtubeRegex)?.[1];
+    const pastedId = query.match(this.#app.tubeLinkRegex)?.[1];
     if (pastedId) {
       this.#play(pastedId, "");
       return;
@@ -89,15 +92,15 @@ export default class YouTubeController {
       const { videos } = await this.#client.searchVideos(query);
       this.#view.showResults({ videos, empty: "No results found." });
     } catch (error) {
-      console.error("[YouTube] search failed", error);
-      this.#view.showResults({ error: `Search failed: ${error.message}. Check that the CORS proxy is reachable and forwards POST requests.` });
+      console.error("[Tube] search failed", error);
+      this.#view.showResults({ error: `Search failed: ${error.message}` });
     }
   }
 
   async #play(videoId, title) {
     if (!this.#client.isConfigured) {
-      alert("Set a CORS proxy in the YouTube tab first.");
-      document.dispatchEvent(new CustomEvent("request-tab", { detail: { tab: "youtube" } }));
+      alert("Set a CORS proxy in the Tube tab first.");
+      document.dispatchEvent(new CustomEvent("request-tab", { detail: { tab: "tube" } }));
       return;
     }
 
@@ -105,15 +108,15 @@ export default class YouTubeController {
     try {
       stream = await this.#client.getStreamUrl(videoId);
     } catch (error) {
-      console.error("[YouTube] stream lookup failed", error);
+      console.error("[Tube] stream lookup failed", error);
       alert(`Cannot play this video: ${error.message}`);
       return;
     }
 
     // Same canvas player as every other source; the stream link expires, so history keeps the watch URL.
     await this.#player.loadVideo(stream.url, {
-      title: title || stream.title || `YouTube ${videoId}`,
-      sourceType: "youtube",
+      title: title || stream.title || `Tube ${videoId}`,
+      sourceType: "tube",
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
       historyId: `https://www.youtube.com/watch?v=${videoId}`,
     });

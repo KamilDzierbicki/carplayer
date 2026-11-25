@@ -54,13 +54,6 @@ export default class HistoryRenderer {
       this.#actions.playJellyfin(itemId, title, serverBaseUrl);
     });
 
-    const searchComponent = document.getElementById("jellyfinSearchComponent");
-    if (searchComponent) {
-      searchComponent.addEventListener("play-jellyfin", (event) => {
-        const { itemId, title, serverBaseUrl } = event.detail;
-        this.#actions.playJellyfin(itemId, title, serverBaseUrl);
-      });
-    }
 
     this.#component.addEventListener("open-url-modal", () => {
       this.#actions.openUrlModal();

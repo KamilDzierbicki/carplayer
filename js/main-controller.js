@@ -21,34 +21,35 @@ export default class MainController {
     }
 
     init() {
+        this.#applyTheme(this.#storage.getTheme());
         this.#historyUI.render();
     }
 
+    #applyTheme(theme) {
+        document.documentElement.dataset.theme = theme;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "light" ? "#f6f7f9" : "#101216");
+    }
+
     #bindMainEvents() {
-        const appNav = document.querySelector("carplayer-navbar");
-        if (appNav) {
-            appNav.addEventListener("action-add-video", () => {
-                this.#app.openUrlModal();
-            });
+        // Cards that act as buttons (history and library tiles, radio stations) react to Enter and Space too.
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            const target = event.target;
+            if (!(target instanceof HTMLElement) || target.tagName === "BUTTON" || target.getAttribute("role") !== "button") return;
+            event.preventDefault();
+            target.click();
+        });
 
-            appNav.addEventListener("action-settings", () => {
-                this.#settingsController.openModal();
-            });
-
-            appNav.addEventListener("action-fullscreen", () => {
-                void this.#toggleFullscreenRedirect();
-            });
-
-            // Jellyfin results render inside the History tab.
-            appNav.addEventListener("search", (event) => {
-                if (event.detail) document.dispatchEvent(new CustomEvent("request-tab", { detail: { tab: "history" } }));
-            });
-        }
-
-        document.addEventListener("tab-change", (event) => {
-            if (event.detail.tab !== "link" || this.#shareController?.isPhoneRelayMode()) return;
-            const qrContainer = document.querySelector("carplayer-add-video-flow #qrcode");
-            void this.#shareController?.showRelayQr(qrContainer, "share", 220);
+        // The dock's action buttons replace the old top navigation bar.
+        document.addEventListener("dock-action", (event) => {
+            const action = event.detail?.action;
+            if (action === "about") this.#settingsController.openModal();
+            if (action === "fullscreen") void this.#toggleFullscreenRedirect();
+            if (action === "theme") {
+                const next = this.#storage.getTheme() === "light" ? "dark" : "light";
+                this.#storage.saveTheme(next);
+                this.#applyTheme(next);
+            }
         });
 
         const btnConfirmFullscreenRedirect = document.getElementById("btnConfirmFullscreenRedirect");

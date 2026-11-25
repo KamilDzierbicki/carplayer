@@ -1,17 +1,10 @@
-import { channelMatchKey, parseM3u, parseXmltvStream } from "./iptv-parsers.js";
+import { channelFavoriteKey, channelMatchKey, parseM3u, parseXmltvStream } from "./iptv-parsers.js";
 import { withCorsProxy } from "./cors-proxy.js";
-
-// Public Polish channels from iptv-org (sends CORS headers). The EPG sample has no CORS,
-// so it loads only with a CORS proxy configured; the channel list works without it.
-const SAMPLE_CONFIG = Object.freeze({
-  playlistUrl: "https://iptv-org.github.io/iptv/countries/pl.m3u",
-  epgUrl: "https://epgshare01.online/epgshare01/epg_ripper_PL1.xml.gz",
-});
 
 const GUIDE_WINDOW_BEFORE_MS = 3 * 3600 * 1000;
 const GUIDE_WINDOW_AFTER_MS = 24 * 3600 * 1000;
 
-/** IPTV tab: playlist + EPG configuration (manual, sample or from phone), channel list and live playback. */
+/** IPTV tab: playlist + EPG configuration (manual or from phone), channel list and live playback. */
 export default class IptvController {
   #app;
   #storage;
@@ -35,16 +28,30 @@ export default class IptvController {
   }
 
   init() {
+    this.#view?.setFavorites(this.#favoriteKeys());
     this.#view?.setConfig(this.#storage.getIptvConfig());
+  }
+
+  /** Plays a favorite channel from its saved stream link, used by the dashboard Favorites widget. */
+  playFavorite(key) {
+    const favorite = this.#storage.getIptvFavorites().find((entry) => entry.key === key);
+    if (!favorite?.url) {
+      alert("Open the IPTV tab once, so CarPlayer can find this channel's stream link.");
+      return;
+    }
+    this.#playChannel(favorite);
   }
 
   #bindEvents() {
     if (!this.#view) return;
 
     this.#view.addEventListener("save-config", (event) => this.#applyConfig(event.detail));
-    this.#view.addEventListener("load-sample", () => this.#applyConfig({ ...SAMPLE_CONFIG, corsProxy: this.#readCorsProxyField() }));
     this.#view.addEventListener("reload", () => void this.#load({ force: true }));
-    this.#view.addEventListener("play-channel", (event) => this.#play(event.detail.channelId));
+    this.#view.addEventListener("play-channel", (event) => {
+      const channel = this.#channels.find((entry) => entry.id === event.detail.channelId);
+      if (channel) this.#playChannel(channel);
+    });
+    this.#view.addEventListener("toggle-favorite", (event) => this.#toggleFavorite(event.detail));
     this.#view.addEventListener("view-change", () => this.#syncRelayQr());
     document.addEventListener("tab-change", (event) => {
       this.#syncRelayQr();
@@ -63,10 +70,6 @@ export default class IptvController {
         alert("IPTV links sent to the car.");
       }
     });
-  }
-
-  #readCorsProxyField() {
-    return String(this.#view?.querySelector('[data-field="corsProxy"]')?.value || "").trim();
   }
 
   #syncRelayQr() {
@@ -105,10 +108,14 @@ export default class IptvController {
     this.#loadedConfigKey = configKey;
     const token = ++this.#loadToken;
 
+    this.#view.setLoading(true);
     this.#view.setStatus("Loading channels...");
+    // A configured guide downloads while the playlist loads; only matching it to channels waits for the playlist.
+    const earlyGuideResponse = config.epgUrl ? this.#fetchAllowingProxy(config.epgUrl, config.corsProxy) : null;
+    earlyGuideResponse?.catch(() => {});
     let playlist;
     try {
-      const response = await fetch(withCorsProxy(config.playlistUrl, config.corsProxy));
+      const response = await this.#fetchAllowingProxy(config.playlistUrl, config.corsProxy);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       playlist = parseM3u(await response.text());
     } catch (error) {
@@ -121,30 +128,48 @@ export default class IptvController {
     if (token !== this.#loadToken) return;
 
     this.#channels = playlist.channels;
+    this.#refreshFavorites();
     this.#view.setChannels(this.#channels);
     this.#view.setGuide(new Map());
 
     const epgUrl = config.epgUrl || playlist.epgUrl;
     if (!epgUrl) {
-      this.#view.setStatus(`${this.#channels.length} channels. No program guide configured.`);
+      this.#view.setStatus("");
       return;
     }
 
-    this.#view.setStatus(`${this.#channels.length} channels. Loading program guide...`);
+    this.#view.setGuide(new Map(), { loading: true });
+    this.#view.setStatus("");
     try {
-      const guide = await this.#loadGuide(withCorsProxy(epgUrl, config.corsProxy));
+      const guide = await this.#loadGuide(epgUrl, config.corsProxy, epgUrl === config.epgUrl ? earlyGuideResponse : null);
       if (token !== this.#loadToken) return;
       this.#view.setGuide(guide);
-      this.#view.setStatus(`${this.#channels.length} channels. Program guide for ${guide.size} of them.`);
+      this.#view.setStatus("");
     } catch (error) {
       if (token !== this.#loadToken) return;
       console.warn("[IPTV] EPG failed", error);
-      this.#view.setStatus(`${this.#channels.length} channels. Program guide failed (${error.message}). If its server has no CORS, set a CORS proxy.`, true);
+      this.#view.setGuide(new Map());
+      this.#view.setStatus(`Program guide failed (${error.message}). Its server may block browsers: set a CORS proxy in IPTV settings or in the Tube tab.`, true);
     }
   }
 
-  async #loadGuide(url) {
-    const response = await fetch(url);
+  /**
+   * Fetches directly, or through the IPTV CORS proxy when one is set. A server without CORS headers fails as a
+   * network error, so a direct fetch is retried once through the proxy saved in the Tube tab.
+   */
+  async #fetchAllowingProxy(url, corsProxy) {
+    if (corsProxy) return fetch(withCorsProxy(url, corsProxy));
+    try {
+      return await fetch(url);
+    } catch (error) {
+      const fallbackProxy = this.#storage.getTubeConfig().proxyUrl;
+      if (!fallbackProxy) throw error;
+      return fetch(withCorsProxy(url, fallbackProxy));
+    }
+  }
+
+  async #loadGuide(url, corsProxy, earlyResponse = null) {
+    const response = await (earlyResponse || this.#fetchAllowingProxy(url, corsProxy));
     if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
 
     // Detect gzip by magic bytes: servers often send .xml.gz as application/octet-stream.
@@ -180,10 +205,30 @@ export default class IptvController {
     }, { from: now - GUIDE_WINDOW_BEFORE_MS, to: now + GUIDE_WINDOW_AFTER_MS });
   }
 
-  #play(channelId) {
-    const channel = this.#channels.find((entry) => entry.id === channelId);
-    if (!channel) return;
+  #favoriteKeys() {
+    return this.#storage.getIptvFavorites().map((entry) => entry.key);
+  }
 
+  #toggleFavorite({ key, channelId }) {
+    const favorites = this.#storage.getIptvFavorites();
+    const channel = this.#channels.find((entry) => entry.id === channelId);
+    const next = favorites.some((entry) => entry.key === key)
+      ? favorites.filter((entry) => entry.key !== key)
+      : [...favorites, channel ? favoriteSnapshot(channel) : { key, name: key, url: "", logo: "" }];
+    this.#storage.saveIptvFavorites(next);
+    this.#view.setFavorites(next.map((entry) => entry.key));
+  }
+
+  /** Stream links and logos can change between playlist versions, so saved favorites follow the loaded playlist. */
+  #refreshFavorites() {
+    const favorites = this.#storage.getIptvFavorites();
+    if (!favorites.length) return;
+    const byKey = new Map(this.#channels.map((channel) => [channelFavoriteKey(channel), channel]));
+    const refreshed = favorites.map((entry) => (byKey.has(entry.key) ? favoriteSnapshot(byKey.get(entry.key)) : entry));
+    if (JSON.stringify(refreshed) !== JSON.stringify(favorites)) this.#storage.saveIptvFavorites(refreshed);
+  }
+
+  #playChannel(channel) {
     if (window.location.protocol === "https:" && channel.url.startsWith("http:")) {
       alert("This channel uses plain HTTP. The browser blocks HTTP streams on an HTTPS page, so it cannot play here.");
       return;
@@ -195,4 +240,8 @@ export default class IptvController {
       thumbnailUrl: channel.logo,
     });
   }
+}
+
+function favoriteSnapshot(channel) {
+  return { key: channelFavoriteKey(channel), name: channel.name, url: channel.url, logo: channel.logo || "" };
 }

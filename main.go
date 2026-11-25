@@ -2,11 +2,13 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -19,10 +21,14 @@ import (
 var (
 	port                   = getEnvAsInt("PORT", 8080)
 	defaultSessionTTLSecs  = getEnvAsInt("DEFAULT_SESSION_TTL_SECONDS", 180)
-	maxSessionTTLSecs      = getEnvAsInt("MAX_SESSION_TTL_SECONDS", 900)
+	maxSessionTTLSecs      = getEnvAsInt("MAX_SESSION_TTL_SECONDS", 180)
 	maxPayloadBytes        = getEnvAsInt("MAX_PAYLOAD_BYTES", 8192)
 	maxQueueMessages       = getEnvAsInt("MAX_QUEUE_MESSAGES", 32)
 	sessionSweepMs         = getEnvAsInt("SESSION_SWEEP_MS", 30000)
+	// Each session can hold up to maxQueueMessages x maxPayloadBytes in memory, so the count is capped.
+	maxSessions            = getEnvAsInt("MAX_SESSIONS", 1000)
+	createPerMinutePerIP   = getEnvAsInt("CREATE_PER_MINUTE_PER_IP", 30)
+	sendPerMinutePerIP     = getEnvAsInt("SEND_PER_MINUTE_PER_IP", 120)
 	allowedOrigins         []string
 	allowedOriginsIncludesAny bool
 )
@@ -76,7 +82,69 @@ type Session struct {
 
 var (
 	sessions sync.Map
+	limiter  = newRateLimiter()
 )
+
+// rateLimiter counts requests per client IP and action in fixed one-minute windows.
+type rateLimiter struct {
+	sync.Mutex
+	windowStart int64
+	counts      map[string]int
+}
+
+func newRateLimiter() *rateLimiter {
+	return &rateLimiter{counts: make(map[string]int)}
+}
+
+func (l *rateLimiter) allow(key string, perMinute int) bool {
+	l.Lock()
+	defer l.Unlock()
+	window := nowMs() / 60000
+	if window != l.windowStart {
+		l.windowStart = window
+		l.counts = make(map[string]int)
+	}
+	l.counts[key]++
+	return l.counts[key] <= perMinute
+}
+
+// clientIP is the caller's address. Behind the reverse proxy (a private or loopback peer) it trusts the proxy's
+// X-Real-Ip / X-Forwarded-For; a direct public peer cannot spoof it.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate()) {
+		if real := strings.TrimSpace(r.Header.Get("X-Real-Ip")); real != "" {
+			return real
+		}
+		if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
+			return strings.TrimSpace(strings.Split(forwarded, ",")[0])
+		}
+	}
+	return host
+}
+
+func tooManyRequests(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", "60")
+	w.WriteHeader(http.StatusTooManyRequests)
+	w.Write([]byte(`{"error":"Too many requests. Try again in a minute."}`))
+}
+
+func countSessions() int {
+	count := 0
+	sessions.Range(func(_, _ interface{}) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+func tokensEqual(a, b string) bool {
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
 
 func randomToken(bytes int) string {
 	b := make([]byte, bytes)
@@ -169,6 +237,18 @@ func handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !limiter.allow("create:"+clientIP(r), createPerMinutePerIP) {
+		tooManyRequests(w)
+		return
+	}
+	if countSessions() >= maxSessions {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(`{"error":"Relay is busy. Try again in a minute."}`))
+		return
+	}
+
 	var reqBody struct {
 		TTLSeconds *float64 `json:"ttlSeconds"`
 	}
@@ -219,6 +299,11 @@ func handleSendSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	
+	if !limiter.allow("send:"+clientIP(r), sendPerMinutePerIP) {
+		tooManyRequests(w)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, int64(maxPayloadBytes) + 4096) // allow slightly more for struct
 
 	var reqBody struct {
@@ -255,7 +340,7 @@ func handleSendSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if writeToken != sess.WriteToken {
+	if !tokensEqual(writeToken, sess.WriteToken) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":"Invalid write token."}`))
@@ -331,7 +416,7 @@ func handleReceiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if readToken != sess.ReadToken {
+	if !tokensEqual(readToken, sess.ReadToken) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnauthorized)
 		w.Write([]byte(`{"error":"Invalid read token."}`))
@@ -398,14 +483,26 @@ func main() {
 			return
 		}
 
-		// Prevent access to sensitive files
+		// Prevent access to sensitive files: any hidden path segment (.git/, .claude/, .env), Go sources and docs
 		baseName := filepath.Base(path)
-		if strings.HasPrefix(baseName, ".") || strings.HasSuffix(baseName, ".go") || strings.HasSuffix(baseName, ".mod") || strings.HasSuffix(baseName, ".md") {
+		hiddenSegment := false
+		for _, segment := range strings.Split(filepath.ToSlash(cleanPath), "/") {
+			if strings.HasPrefix(segment, ".") && segment != "." {
+				hiddenSegment = true
+				break
+			}
+		}
+		if hiddenSegment || strings.HasSuffix(baseName, ".go") || strings.HasSuffix(baseName, ".mod") || strings.HasSuffix(baseName, ".md") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusForbidden)
 			w.Write([]byte(`{"error":"Access denied."}`))
 			return
 		}
+
+		// Security headers on every page and file, including the index.html fallback
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		w.Header().Set("Content-Security-Policy", "frame-ancestors 'self'")
 
 		fileInfo, err := os.Stat(path)
 
@@ -422,8 +519,7 @@ func main() {
 			return
 		}
 
-		// Security and caching headers for static files
-		w.Header().Set("X-Content-Type-Options", "nosniff")
+		// Caching headers for static files
 		if strings.HasSuffix(path, ".html") {
 			w.Header().Set("Cache-Control", "no-cache")
 		} else {

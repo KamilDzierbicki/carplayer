@@ -1,19 +1,22 @@
 // radio-browser.info: free community station directory with CORS. "all." resolves to one of its mirrors.
 const RADIO_API = "https://all.api.radio-browser.info/json";
 const LIST_QUERY = "order=clickcount&reverse=true&hidebroken=true&limit=60";
-const SAMPLE_COUNT = 6;
 
 /** Internet radio: station directory, favorites in localStorage and playback through a plain <audio> element. */
 export default class RadioController {
+  #app;
   #storage;
+  #share;
   #view;
   #bar;
   #audio = new Audio();
   #current = null;
   #popularLoaded = false;
 
-  constructor({ storage }) {
+  constructor({ app, storage, share }) {
+    this.#app = app;
     this.#storage = storage;
+    this.#share = share;
     this.#view = document.getElementById("radioComponent");
     this.#bar = document.getElementById("radioBar");
     this.#audio.preload = "none";
@@ -21,20 +24,64 @@ export default class RadioController {
     this.#bindEvents();
   }
 
+  /** Plays a station from "My stations", used by the dashboard Favorites widget. */
+  playFavorite(stationId) {
+    const station = this.#storage.getRadioFavorites().find((entry) => entry.id === stationId);
+    if (station) this.#play(station);
+  }
+
   init() {
+    // Earlier versions put the featured list into "My stations" automatically ("default-" ids); take those out once.
+    if (this.#storage.takeRadioDefaultsFlag()) {
+      this.#storage.saveRadioFavorites(this.#storage.getRadioFavorites().filter((station) => !String(station.id).startsWith("default-")));
+    }
     const favorites = this.#storage.getRadioFavorites();
     this.#view?.setFavorites(favorites);
+    // Nothing is pre-added: without own stations the tab opens on the popular list (loaded when the tab opens).
     this.#view?.setSection(favorites.length ? "favorites" : "popular");
   }
 
   #bindEvents() {
-    this.#view?.addEventListener("search", (event) => void this.#search(event.detail.query));
+    // Skips the native "search" event of <input type="search">, which bubbles here with no detail.
+    this.#view?.addEventListener("search", (event) => {
+      if (event.detail?.query) void this.#search(event.detail.query);
+    });
     this.#view?.addEventListener("section-change", (event) => {
       if (event.detail.section === "popular") void this.#loadPopular();
     });
     this.#view?.addEventListener("play-station", (event) => this.#play(event.detail.station));
     this.#view?.addEventListener("toggle-favorite", (event) => this.#toggleFavorite(event.detail.station));
-    this.#view?.addEventListener("load-sample", () => void this.#loadSample());
+    this.#view?.addEventListener("open-add-station", () => this.#app.openModal("addStationModal"));
+    // Same pattern as the other setup flows: type it here, or send it from a phone with the QR code.
+    this.#share.registerMobileMode("radioshare", "mobileRadioModal");
+    this.#share.registerPayloadHandler("radio-station", (value) => {
+      if (this.#addCustomStation(value)) this.#app.closeModal("addStationModal");
+    });
+    document.addEventListener("modal-open", (event) => {
+      if (event.target?.id !== "addStationModal" || this.#share.isPhoneRelayMode()) return;
+      void this.#share.showRelayQr(event.target.querySelector("carplayer-setup-card")?.qrContainer, "radioshare", 200);
+    });
+    document.getElementById("btnAddStation")?.addEventListener("click", () => {
+      const name = document.getElementById("addStationName");
+      const url = document.getElementById("addStationUrl");
+      if (this.#addCustomStation({ name: name?.value, url: url?.value })) {
+        name.value = "";
+        url.value = "";
+        this.#app.closeModal("addStationModal");
+      }
+    });
+    document.getElementById("btnSendRadioStation")?.addEventListener("click", async () => {
+      const name = String(document.getElementById("mobileRadioNameInput")?.value || "").trim();
+      const url = String(document.getElementById("mobileRadioUrlInput")?.value || "").trim();
+      if (!url) {
+        alert("Paste the stream link first.");
+        return;
+      }
+      if (await this.#share.sendPayloadToCar({ type: "radio-station", value: { name, url } })) {
+        this.#app.closeModal("mobileRadioModal");
+        alert("Station sent to the car.");
+      }
+    });
 
     document.addEventListener("tab-change", (event) => {
       if (event.detail.tab === "radio" && this.#view?.section === "popular") void this.#loadPopular();
@@ -63,7 +110,8 @@ export default class RadioController {
     if (this.#popularLoaded && !force) return;
     this.#view.setStations("popular", { loading: true });
     try {
-      const stations = await this.#fetchStations("countrycode=PL");
+      // Worldwide, most listened first: the app has no home country.
+      const stations = await this.#fetchStations("");
       this.#popularLoaded = true;
       this.#view.setStations("popular", { stations });
     } catch (error) {
@@ -82,17 +130,20 @@ export default class RadioController {
     }
   }
 
-  async #loadSample() {
-    try {
-      const stations = (await this.#fetchStations("countrycode=PL")).filter((station) => station.playable);
-      const favorites = this.#storage.getRadioFavorites();
-      const known = new Set(favorites.map((station) => station.id));
-      const added = stations.filter((station) => !known.has(station.id)).slice(0, SAMPLE_COUNT);
-      this.#saveFavorites([...favorites, ...added]);
-      this.#view.setSection("favorites");
-    } catch (error) {
-      alert(`Could not load sample stations (${error.message}).`);
+  /** @returns {boolean} whether the station was added */
+  #addCustomStation({ name, url }) {
+    const station = this.#normalize({ name: String(name || "").trim(), url_resolved: String(url || "").trim(), countrycode: "", tags: "own link" });
+    if (!/^https?:\/\//i.test(station.url)) {
+      alert("Enter a stream link that starts with http:// or https://");
+      return false;
     }
+    station.id = `custom-${station.url}`;
+    const favorites = this.#storage.getRadioFavorites().filter((entry) => entry.id !== station.id);
+    this.#saveFavorites([station, ...favorites]);
+    this.#view.setSection("favorites");
+    if (station.playable) this.#play(station);
+    else alert(station.unplayableReason);
+    return true;
   }
 
   #toggleFavorite(station) {

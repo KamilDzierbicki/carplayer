@@ -33,8 +33,11 @@ export default class SettingsTransferController {
 
   /** Phone side: a scanned export link imports settings once and cleans the address bar. */
   async handleImportLink() {
+    // Settings travel after "#", which browsers never send to the server, so keys stay out of access logs.
+    // Older export links used "?importsettings=" and are still accepted.
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
     const params = new URLSearchParams(window.location.search);
-    const encoded = params.get(IMPORT_PARAM);
+    const encoded = hashParams.get(IMPORT_PARAM) || params.get(IMPORT_PARAM);
     if (!encoded) return;
 
     params.delete(IMPORT_PARAM);
@@ -59,7 +62,7 @@ export default class SettingsTransferController {
 
     if (exportBox) {
       const url = new URL(window.location.pathname, window.location.origin);
-      url.searchParams.set(IMPORT_PARAM, await deflateBase64Url(JSON.stringify(this.#storage.exportSettings())));
+      url.hash = `${IMPORT_PARAM}=${await deflateBase64Url(JSON.stringify(this.#storage.exportSettings()))}`;
       exportBox.replaceChildren();
       if (url.href.length > MAX_QR_URL_CHARS) {
         exportBox.textContent = "Your settings are too large for one QR code. Remove some radio favorites or tasks and try again.";
@@ -72,6 +75,7 @@ export default class SettingsTransferController {
           colorLight: "#ffffff",
           correctLevel: QRCode.CorrectLevel.L,
         });
+        exportBox.querySelector("img")?.setAttribute("alt", "QR code with your settings for the phone");
       }
     }
 

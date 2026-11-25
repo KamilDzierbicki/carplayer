@@ -1,13 +1,13 @@
 import VideoTileRenderer from "../video-tile-renderer.js";
 
 /**
- * <carplayer-youtube> - YouTube tab: proxy setup card or search + results.
+ * <carplayer-tube> - Tube tab: proxy setup card or search + results.
  *
  * Methods: setConfig({proxyUrl}), showResults(state)
  * Events: 'save-config' {proxyUrl}, 'search' {query},
- *         'play-youtube' {id, title}, 'edit-config'
+ *         'play-tube' {id, title}, 'edit-config'
  */
-export default class CarplayerYoutube extends HTMLElement {
+export default class CarplayerTube extends HTMLElement {
   #rendered = false;
   #configured = false;
 
@@ -18,14 +18,21 @@ export default class CarplayerYoutube extends HTMLElement {
     this.innerHTML = `
       <div class="tab-view">
         <div class="tab-view__setup hidden" data-role="setup">
-          <carplayer-setup-card heading="Connect a CORS proxy for YouTube"
-            note="YouTube does not allow other websites to read it, so search and video files go through a CORS proxy. The proxy must forward POST requests and Range headers. Use {url} where the encoded address goes, or the address is appended at the end. Videos play in 360p."
+          <carplayer-setup-card heading="Connect Tube" icon="tube"
+            note="Tube blocks other websites, so search and videos go through your CORS proxy."
             phone-step='Paste the proxy address and tap "Send to Car".'>
-            <carplayer-clearable-input data-field="proxyUrl" type="text" placeholder="https://proxy.example/?url={url}" class="field field--url"></carplayer-clearable-input>
+            <label class="field-label">CORS proxy address
+              <carplayer-clearable-input data-field="proxyUrl" type="text" placeholder="https://proxy.example/?url={url}" class="field field--url"></carplayer-clearable-input>
+            </label>
             <div class="button-row">
               <button class="btn btn--primary" data-action="save" type="button">Save proxy</button>
               <button class="btn btn--ghost hidden" data-action="cancel" type="button">Cancel</button>
             </div>
+            <ul class="setup-facts">
+              <li><b>{url}</b> marks where the encoded address goes. Without it, the address is added at the end.</li>
+              <li>The proxy must forward POST requests and the Range header.</li>
+              <li>Videos play in 360p, the best quality Tube sends as one file.</li>
+            </ul>
           </carplayer-setup-card>
         </div>
 
@@ -33,7 +40,7 @@ export default class CarplayerYoutube extends HTMLElement {
           <div class="tab-toolbar">
             <form class="tab-search" data-role="search-form" autocomplete="on">
               <span class="icon icon--sm icon-mask icon-mask--search" aria-hidden="true"></span>
-              <input class="tab-search__input" name="youtube_query" type="search" placeholder="Search YouTube or paste a YouTube link" />
+              <input class="tab-search__input" name="tube_query" type="search" placeholder="Search Tube or paste a Tube link" />
               <button class="btn btn--primary btn--compact" type="submit">Search</button>
             </form>
             <button class="icon-btn" data-action="edit" type="button" title="Proxy settings" aria-label="Proxy settings">
@@ -55,13 +62,13 @@ export default class CarplayerYoutube extends HTMLElement {
     });
     this.querySelector('[data-role="search-form"]').addEventListener("submit", (event) => {
       event.preventDefault();
-      const query = event.target.elements.youtube_query.value.trim();
+      const query = event.target.elements.tube_query.value.trim();
       if (query) this.dispatchEvent(new CustomEvent("search", { detail: { query } }));
     });
     this.querySelector('[data-role="results"]').addEventListener("click", (event) => {
-      const tile = event.target.closest('[data-play-type="youtube"]');
+      const tile = event.target.closest('[data-play-type="tube"]');
       if (!tile) return;
-      this.dispatchEvent(new CustomEvent("play-youtube", {
+      this.dispatchEvent(new CustomEvent("play-tube", {
         detail: { id: tile.dataset.videoId, title: decodeURIComponent(tile.dataset.videoTitle || "") },
       }));
     });
@@ -87,7 +94,7 @@ export default class CarplayerYoutube extends HTMLElement {
   showResults({ loading = false, error = "", videos = [], empty = "" }) {
     const container = this.querySelector('[data-role="results"]');
     if (loading) {
-      container.innerHTML = '<div class="text-empty-state"><div class="loader loader-inline is-visible"></div><div class="loader-text">Searching YouTube...</div></div>';
+      container.innerHTML = '<div class="text-empty-state"><div class="loader loader-inline is-visible"></div><div class="loader-text">Searching Tube...</div></div>';
       return;
     }
     if (error || !videos.length) {
@@ -98,7 +105,7 @@ export default class CarplayerYoutube extends HTMLElement {
       container.appendChild(message);
       return;
     }
-    container.replaceChildren(...videos.map((video) => VideoTileRenderer.createYouTubeSearchTile(video)));
+    container.replaceChildren(...videos.map((video) => VideoTileRenderer.createTubeSearchTile(video)));
   }
 
   #showSetup(visible) {
@@ -117,4 +124,4 @@ export default class CarplayerYoutube extends HTMLElement {
   }
 }
 
-customElements.define("carplayer-youtube", CarplayerYoutube);
+customElements.define("carplayer-tube", CarplayerTube);

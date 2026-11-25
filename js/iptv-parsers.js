@@ -51,6 +51,11 @@ export function parseM3u(text) {
   return { channels, epgUrl };
 }
 
+/** Stable id of a channel across playlist reloads: channel ids are list positions, so tvg-id or the name is used. */
+export function channelFavoriteKey(channel) {
+  return channel.tvgId || channel.name;
+}
+
 /** Normalized key used to match playlist channels with EPG channels from another source. */
 export function channelMatchKey(value) {
   return String(value || "")
@@ -58,7 +63,7 @@ export function channelMatchKey(value) {
     .replace(/@.*$/, "")
     .replace(/\(.*?\)|\[.*?\]/g, "")
     .replace(/\b(hd|sd|fhd|uhd|4k|hevc)\b/g, "")
-    .replace(/[^a-z0-9]/g, "");
+    .replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 /**
@@ -78,8 +83,11 @@ export async function parseXmltvStream(textStream, resolveChannel, window) {
 
   const consume = (final) => {
     let cursor = 0;
+    // The next "<channel" is searched again only once the cursor passes it. Channels come first in XMLTV, so after
+    // them a fresh search per programme would rescan the whole buffer every time (quadratic, seconds per chunk).
+    let channelStart = buffer.indexOf("<channel", cursor);
     while (true) {
-      const channelStart = buffer.indexOf("<channel", cursor);
+      if (channelStart >= 0 && channelStart < cursor) channelStart = buffer.indexOf("<channel", cursor);
       const programmeStart = buffer.indexOf("<programme", cursor);
       const starts = [channelStart, programmeStart].filter((index) => index >= 0);
       if (!starts.length) break;
@@ -125,11 +133,17 @@ export async function parseXmltvStream(textStream, resolveChannel, window) {
     buffer = final ? "" : buffer.slice(cursor);
   };
 
+  // Give the page a frame now and then, so a large guide does not freeze the UI while it is parsed.
+  let lastYield = performance.now();
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
     buffer += value;
     consume(false);
+    if (performance.now() - lastYield > 50) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      lastYield = performance.now();
+    }
   }
   consume(true);
 
@@ -169,7 +183,12 @@ function decodeXml(value) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => safeCodePoint(parseInt(code, 16)))
+    .replace(/&#(\d+);/g, (_, code) => safeCodePoint(Number(code)))
     .replace(/&amp;/g, "&")
     .trim();
+}
+
+function safeCodePoint(code) {
+  return Number.isInteger(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : "";
 }

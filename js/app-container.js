@@ -8,7 +8,8 @@ import ShareController from "./share.js";
 import MainController from "./main-controller.js";
 import TabController from "./tabs.js";
 import DashboardController from "./dashboard.js";
-import YouTubeController from "./youtube.js";
+import TubeController from "./tube.js";
+import JellyfinTabController from "./jellyfin-tab.js";
 import IptvController from "./iptv.js";
 import RadioController from "./radio.js";
 import MirrorController from "./mirror.js";
@@ -46,15 +47,20 @@ export default class AppContainer {
       player: this.#playerController,
       jellyfinService: this.#jellyfinService,
     };
-    this.#tabController = new TabController(this.#storage);
+    this.#tabController = new TabController();
     this.#featureControllers = {
       dashboard: new DashboardController(featureDeps),
-      youtube: new YouTubeController(featureDeps),
+      tube: new TubeController(featureDeps),
+      jellyfin: new JellyfinTabController(featureDeps),
       iptv: new IptvController(featureDeps),
       radio: new RadioController(featureDeps),
       mirror: new MirrorController(featureDeps),
       transfer: new SettingsTransferController(featureDeps),
     };
+    this.#featureControllers.dashboard.setFavoritePlayers({
+      ...this.#featureControllers,
+      playVideo: (entry) => this.#playSaved(entry),
+    });
 
     this.#mainController = new MainController({
       app: this.#app,
@@ -69,7 +75,8 @@ export default class AppContainer {
 
   start() {
     this.#mainController.init();
-    this.#featureControllers.youtube.init();
+    this.#featureControllers.tube.init();
+    this.#featureControllers.jellyfin.init();
     this.#featureControllers.iptv.init();
     this.#featureControllers.radio.init();
     this.#tabController.init();
@@ -90,20 +97,26 @@ export default class AppContainer {
     this.#shareController.setPlayerController(this.#playerController);
 
     this.#historyUI.setActions({
-      playUrl: (url) => {
-        // Keep the stored title and source of YouTube / IPTV entries instead of deriving one from the URL.
-        const item = this.#storage.getHistory().find((entry) => entry.id === url);
-        const youtubeId = item?.sourceType === "youtube" ? url.match(this.#app.youtubeRegex)?.[1] : "";
-        if (youtubeId) return this.#featureControllers.youtube.play(youtubeId, item.title);
-        return this.#playerController.loadVideo(url, {
-          title: item?.title,
-          sourceType: item?.sourceType,
-          thumbnailUrl: item?.thumbnailUrl,
-        });
-      },
+      // Keep the stored title and source of Tube / IPTV entries instead of deriving one from the URL.
+      playUrl: (url) => this.#playSaved(this.#storage.getHistory().find((entry) => entry.id === url) || { id: url }),
       playJellyfin: (itemId, title, serverBaseUrl) => this.#jellyfinService.load(itemId, title, serverBaseUrl),
       shareUrl: (url) => this.#shareController.shareVideo(url),
       openUrlModal: () => this.#app.openUrlModal(),
+    });
+  }
+
+  /** Plays a history or favorite entry ({ id, title, sourceType, thumbnailUrl }) the way it was first opened. */
+  #playSaved(entry) {
+    const jellyfin = JellyfinService.parseSessionUrl(entry.id);
+    if (jellyfin) return this.#jellyfinService.load(jellyfin.itemId, entry.title, jellyfin.serverBaseUrl);
+    // "youtube" is the source type of history entries saved before the rename.
+    const isTube = ["tube", "youtube"].includes(entry.sourceType);
+    const tubeId = isTube ? entry.id.match(this.#app.tubeLinkRegex)?.[1] : "";
+    if (tubeId) return this.#featureControllers.tube.play(tubeId, entry.title);
+    return this.#playerController.loadVideo(entry.id, {
+      title: entry.title,
+      sourceType: entry.sourceType,
+      thumbnailUrl: entry.thumbnailUrl,
     });
   }
 }

@@ -36,6 +36,7 @@ export default class CarplayerModal extends HTMLElement {
         if (oldVal === newVal) return;
         if (name === 'modal-title' && this._titleEl) {
             this._titleEl.textContent = newVal ?? '';
+            this._content?.setAttribute('aria-label', newVal || this.getAttribute('aria-label') || '');
         }
         if (name === 'variant' && this._content) {
             // Remove old variant class
@@ -47,13 +48,18 @@ export default class CarplayerModal extends HTMLElement {
     // ── Public API ───────────────────────────────────────
 
     open() {
+        // Focus moves into the dialog and returns to the opener on close, for keyboard and screen reader users.
+        this._opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         this.classList.add('active');
         this.dispatchEvent(new CustomEvent('modal-open', { bubbles: true }));
+        this._content?.focus({ preventScroll: true });
     }
 
     close() {
         this.classList.remove('active');
         this.dispatchEvent(new CustomEvent('modal-close', { bubbles: true }));
+        if (this._opener?.isConnected) this._opener.focus({ preventScroll: true });
+        this._opener = null;
     }
 
     toggle() {
@@ -72,6 +78,9 @@ export default class CarplayerModal extends HTMLElement {
         // Build wrapper
         this._content = document.createElement('div');
         this._content.className = 'modal__content';
+        this._content.setAttribute('role', 'dialog');
+        this._content.setAttribute('aria-modal', 'true');
+        this._content.tabIndex = -1;
         const variant = this.getAttribute('variant');
         if (variant) this._content.classList.add(`modal__content--${variant}`);
 
@@ -87,6 +96,8 @@ export default class CarplayerModal extends HTMLElement {
         this._titleEl = document.createElement('h2');
         this._titleEl.className = 'modal__title';
         this._titleEl.textContent = title;
+        // A modal without a visible title (About) names its dialog through the host's aria-label.
+        this._content.setAttribute('aria-label', title || this.getAttribute('aria-label') || '');
 
         // Body — wrap original children
         this._body = document.createDocumentFragment();
@@ -100,6 +111,10 @@ export default class CarplayerModal extends HTMLElement {
 
         // Events
         this._closeBtn.addEventListener('click', () => this.close());
+        // Escape closes an open modal, as keyboard users expect.
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && this.classList.contains('active')) this.close();
+        });
         this.addEventListener('click', (e) => {
             // Click on the modal backdrop (self) closes
             if (e.target === this) this.close();

@@ -10,25 +10,39 @@ entertainment restrictions.
 
 1. Open your car's browser.
 2. Go to: <https://carplayer.oxyconit.com/>.
-3. Click 'Add Video'.
-4. Scan the QR code with your phone or type a direct .mp4 link manually.
-5. Paste the video link on your phone and tap 'Send to Car'.
-6. Watch
+3. Pick a tab in the dock at the bottom: Play link, Jellyfin, Tube, IPTV, Radio or Mirror screen.
+4. Type the link or settings on the car screen, or scan the QR code with your phone and send them from there.
+5. Watch or listen. The app keeps playing while the car is in Drive.
 
 ## Functions
 
-- Play videos from direct links (sent via QR code or entered manually).
-- Play videos from your Jellyfin server.
-- Search for Jellyfin videos directly in the app.
-- Save your recent viewing history.
-- Control the playback speed.
-- Resume videos from where you left off.
-- Save your volume, subtitles and playback speed settings between sessions.
-- All played recently, settings, api keys are stored locally in your browser.
-- Select audio, captions and video quality when using Jellyfin.
-- Large buttons designed for car displays
-- Go full-screen on Tesla cars.
-- Share links from your mobile phone to your car without having to type long URLs.
+### Dashboard
+
+- Widgets: clock, weather, GPS speed, G-Force meter, calculator, todo list, Jellyfin rows and Favorites.
+
+### Video
+
+- Play direct video links (.mp4, .webm, HLS .m3u8, live streams), typed in or sent from your phone ("Play link").
+- Play videos from your Jellyfin server and search its library; video codec and buffer are set in the Jellyfin tab.
+- Tube: search and play videos through a CORS proxy you host yourself.
+- Heart button in the player saves the current video to Favorites.
+- Playback speed, captions, audio track and quality selection; live streams show a red "LIVE" badge.
+- Resume where you left off, and recent history on the History tab.
+- Dolby audio (AC-3 / E-AC-3) is converted in the browser as a last resort, when a stream has no other audio track.
+
+### TV and radio
+
+- IPTV: your own M3U playlist with a program guide (XMLTV) shown as a timeline in your local time zone.
+  Mark channels with a heart and filter them with the Favorites chip.
+- Radio: search the radio-browser.info directory, see the most popular stations worldwide, add your own stream links
+  and keep them in "My stations". No stations are pre-added.
+
+### Phone and car
+
+- Send links and settings from your phone with a QR code, without typing long URLs in the car.
+- Open link: send any web page from your phone and open it in the car browser.
+- Mirror: show a laptop screen in the car.
+- Move all settings between devices with "Move settings" on the About page.
 
 ## Relay backend (VPS)
 
@@ -36,8 +50,9 @@ QR code sharing sends small payloads through a short-lived HTTP relay session:
 
 1. Car creates a relay session (`sessionId`, `readToken`, `writeToken`) with TTL.
 2. QR contains only `sessionId` + `writeToken`.
-3. Phone sends payload (`video-url`, `jellyfin-config`, `caption-url`, `redirect-url`) to relay.
-4. Car polls relay and consumes queued payloads.
+3. Phone sends a payload (for example `video-url`, `jellyfin-config`, `iptv-config`, `radio-station`, `tube-config`,
+   `redirect-url` or `settings-import`) to the relay.
+4. Car polls relay and consumes queued payloads. The relay keeps them in memory only, for at most 180 seconds.
 
 Why not P2P? It avoids LTE/hotspot NAT issues entirely because it is an HTTPS relay
 
@@ -71,14 +86,17 @@ go run main.go
 ```
 *The app will be available at `http://localhost:8080/`. This runs both the static site and the relay backend.*
 
-### Option 2: Easy and fast
+### Option 2: Any static server
 
-Just open `index.html` in your browser without any server.
+Playback works with any static file server (for example `python3 -m http.server`), but QR code sharing needs the
+relay from Option 1. Opening `index.html` straight from disk does not work, because browsers block ES modules on
+`file://` pages.
 
 ## Limitations
 
 - CORS must be enabled on media hosts (`Access-Control-Allow-Origin`).
-- Browser must support WebCodecs + MediaSource for full functionality
+- Browser must support WebCodecs + MediaSource for full functionality.
+- Some videos needs your own CORS proxy, and some IPTV and EPG servers need one too.
 
 ## Contributing
 

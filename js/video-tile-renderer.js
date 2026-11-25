@@ -60,7 +60,7 @@ export default class VideoTileRenderer {
     tile.innerHTML = `
       ${thumbnailHtml}
       <div class="tile-info">
-        <div class="tile-title" title="${escapedTitleAttr}">${titleHtml}</div>
+        <div class="tile-title" role="button" tabindex="0" title="${escapedTitleAttr}">${titleHtml}</div>
       </div>
     `;
     return tile;
@@ -105,21 +105,21 @@ export default class VideoTileRenderer {
     tile.innerHTML = `
       ${thumbnailHtml}
       <div class="tile-info">
-        <div class="tile-title" title="${escapedTitleAttr}">${titleHtml}</div>
+        <div class="tile-title" role="button" tabindex="0" title="${escapedTitleAttr}">${titleHtml}</div>
       </div>
       <div class="video-meta">${metaHtml}</div>
     `;
     return tile;
   }
 
-  static createYouTubeSearchTile({ id, title, durationText, thumbnailUrl, channelName, viewCountText }) {
+  static createTubeSearchTile({ id, title, durationText, thumbnailUrl, channelName, viewCountText }) {
     const safeTitle = String(title || "");
     const metaText = [channelName, viewCountText].filter(Boolean).join(" • ");
 
     const tile = document.createElement("div");
     tile.className = "video-tile";
     tile.setAttribute("data-action", "play-video");
-    tile.setAttribute("data-play-type", "youtube");
+    tile.setAttribute("data-play-type", "tube");
     tile.setAttribute("data-video-id", this.#escapeAttr(String(id || "")));
     tile.setAttribute("data-video-title", encodeURIComponent(safeTitle));
 
@@ -131,9 +131,35 @@ export default class VideoTileRenderer {
     tile.innerHTML = `
       ${thumbnailHtml}
       <div class="tile-info">
-        <div class="tile-title" title="${this.#escapeAttr(safeTitle)}">${this.#escapeHtml(safeTitle)}</div>
+        <div class="tile-title" role="button" tabindex="0" title="${this.#escapeAttr(safeTitle)}">${this.#escapeHtml(safeTitle)}</div>
       </div>
       <div class="video-meta">${this.#escapeHtml(metaText)}</div>
+    `;
+    return tile;
+  }
+
+  /**
+   * Tile for the dashboard Favorites widget. Channel and station logos are shown whole; `cover` fills the tile
+   * with a video thumbnail instead.
+   */
+  static createFavoriteTile({ playType, key, title, logoUrl, metaText, cover = false }) {
+    const safeTitle = String(title || "");
+    const logo = this.#escapeUrlForCss(logoUrl);
+
+    const tile = document.createElement("div");
+    tile.className = "video-tile";
+    tile.setAttribute("data-action", "play-video");
+    tile.setAttribute("data-play-type", playType);
+    tile.setAttribute("data-favorite-key", this.#escapeAttr(String(key || "")));
+
+    tile.innerHTML = `
+      <div class="tile-thumbnail ${cover && logo ? "tile-thumbnail--cover" : "tile-thumbnail--logo"}"${logo ? ` style="background-image: url('${logo}');"` : ""}>
+        ${logo ? "" : `<span class="tile-thumbnail__initials">${this.#escapeHtml(initials(safeTitle))}</span>`}
+      </div>
+      <div class="tile-info">
+        <div class="tile-title" role="button" tabindex="0" title="${this.#escapeAttr(safeTitle)}">${this.#escapeHtml(safeTitle)}</div>
+      </div>
+      <div class="video-meta">${this.#escapeHtml(String(metaText || ""))}</div>
     `;
     return tile;
   }
@@ -186,7 +212,14 @@ export default class VideoTileRenderer {
     return this.#escapeHtml(value).replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
 
+  /** URL safe inside style="background-image: url('...')": allowed schemes only, quotes and brackets encoded. */
   static #escapeUrlForCss(value) {
-    return String(value || "").replace(/'/g, "%27").replace(/\)/g, "%29");
+    const url = String(value || "").trim();
+    if (!/^(https?:|data:image\/|blob:)/i.test(url)) return "";
+    return url.replace(/["'()\\<>\s]/g, (char) => `%${char.charCodeAt(0).toString(16).padStart(2, "0")}`);
   }
+}
+
+function initials(name) {
+  return name.replace(/[^\p{L}\p{N} ]/gu, "").split(" ").filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "?";
 }

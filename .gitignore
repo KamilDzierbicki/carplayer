@@ -15,3 +15,7 @@ Desktop.ini
 *~
 .directory
 server_go.bin
+
+# Local secrets
+.env
+.env.*

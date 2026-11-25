@@ -84,6 +84,9 @@ export default class CarplayerClearableInput extends HTMLElement {
         if (name) this.dom.input.name = name;
         const autocomplete = this.getAttribute('autocomplete');
         if (autocomplete) this.dom.input.autocomplete = autocomplete;
+        // An input without a visible <label> gets its name from the host's aria-label.
+        const ariaLabel = this.getAttribute('aria-label');
+        if (ariaLabel) this.dom.input.setAttribute('aria-label', ariaLabel);
         if (this.hasAttribute('readonly')) this.dom.input.readOnly = true;
         const val = this.getAttribute('value');
         if (val) this.dom.input.value = val;

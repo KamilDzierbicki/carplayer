@@ -125,7 +125,11 @@ class SubtitleManager {
 		const safe = String(text || '').trim();
 
 		if(safe) {
-			this._overlay.innerHTML = `<span class="caption-overlay__text">${safe}</span>`;
+			// Cue text comes from external SRT/VTT files: render it as text, never as HTML.
+			const line = document.createElement('span');
+			line.className = 'caption-overlay__text';
+			line.textContent = safe.replace(/<[^>]*>/g, '');
+			this._overlay.replaceChildren(line);
 			this._overlay.classList.add('is-visible');
 			this._overlay.style.opacity = '1';
 		} else {
@@ -613,6 +617,7 @@ export default class PlayerController {
 		this.rebuffering = false;
 
 		this.currentUrl = '';
+		this.currentTitle = '';
 		this.availableAudioTracks = [];
 		this.selectedDirectTrackId = '';
 		this.selectedAudioStreamIndex = null;
@@ -1068,6 +1073,8 @@ export default class PlayerController {
 		const startTime = Math.max(0, Number(options.startTime) || 0);
 
 		this.currentUrl = options.url || '';
+		this.currentTitle = title;
+		this.dom.videoControls?.setFavorite(this.storage.isVideoFavorite(this.currentUrl));
 		if(this.topBar) {
 			this.topBar.setAttribute('video-title', title);
 		}
@@ -1255,13 +1262,16 @@ export default class PlayerController {
 	/**
 	 * @param {string} videoUrl direct file or HLS playlist URL (live playlists are detected automatically)
 	 * @param {{title?: string, sourceType?: string, thumbnailUrl?: string, historyId?: string}} options
-	 *   historyId: stable key for history and resume when the source URL expires (YouTube stream links)
+	 *   historyId: stable key for history and resume when the source URL expires (Tube stream links)
 	 */
 	async loadVideo(videoUrl, options = {}) {
 		if(!videoUrl) return;
 
 		const normalizedUrl = toHttpUrl(videoUrl);
-		if(!normalizedUrl) return;
+		if(!normalizedUrl) {
+			alert('Enter a video link that starts with http:// or https://');
+			return;
+		}
 
 		if(this.app.dom.urlInput) this.app.dom.urlInput.value = '';
 
@@ -1441,6 +1451,12 @@ export default class PlayerController {
 
 			this.dom.videoControls.addEventListener('action-play', () => {
 				void this.play();
+			});
+
+			this.dom.videoControls.addEventListener('action-favorite', () => {
+				if(!this.currentUrl) return;
+				const isFavorite = this.storage.toggleVideoFavorite(this.currentUrl, {title: this.currentTitle});
+				this.dom.videoControls.setFavorite(isFavorite);
 			});
 
 			this.dom.videoControls.addEventListener('action-pause', () => {
