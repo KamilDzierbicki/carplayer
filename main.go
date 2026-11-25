@@ -519,11 +519,14 @@ func main() {
 			return
 		}
 
-		// Caching headers for static files
-		if strings.HasSuffix(path, ".html") {
+		// Caching headers for static files. HTML, JS and CSS are revalidated on every load (a 304 when unchanged),
+		// so a deploy reaches the car at once: these files are ES modules without versioned names, and a cached
+		// max-age (raised to 4 hours by Cloudflare's Browser Cache TTL) kept old code running after deploys.
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".html", ".js", ".css":
 			w.Header().Set("Cache-Control", "no-cache")
-		} else {
-			// Cache standard assets for 1 hour
+		default:
+			// Icons and images change rarely: cache them for 1 hour
 			w.Header().Set("Cache-Control", "public, max-age=3600")
 		}
 		
