@@ -34,8 +34,9 @@ entertainment restrictions.
 
 - IPTV: your own M3U playlist with a program guide (XMLTV) shown as a timeline in your local time zone.
   Mark channels with a heart and filter them with the Favorites chip.
-- Radio: search the radio-browser.info directory, see the most popular stations worldwide, add your own stream links
-  and keep them in "My stations". No stations are pre-added.
+- Radio: search the radio-browser.info directory, see popular stations in your country (from the browser language),
+  in other countries or worldwide, add your own stream links and keep them in "My stations". No stations are
+  pre-added.
 
 ### Phone and car
 

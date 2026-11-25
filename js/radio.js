@@ -1,6 +1,8 @@
 // radio-browser.info: free community station directory with CORS. "all." resolves to one of its mirrors.
 const RADIO_API = "https://all.api.radio-browser.info/json";
 const LIST_QUERY = "order=clickcount&reverse=true&hidebroken=true&limit=60";
+// "Popular in XX" chips after the listener's own country: the directory's countries with the most stations.
+const TOP_COUNTRIES = 12;
 
 // Stations missing from radio-browser.info. They only join search results that match their name: nothing is shown
 // or added to "My stations" without the user's search and tap.
@@ -19,6 +21,19 @@ const EXTRA_STATIONS = Object.freeze([
   countrycode: "PL", tags: "",
 })));
 
+/**
+ * The listener's country from the browser language ("de-AT" -> AT; "de" -> DE as its likeliest region),
+ * or "" when the browser does not say.
+ */
+function browserCountry() {
+  try {
+    const region = new Intl.Locale(navigator.language || "").maximize().region || "";
+    return /^[A-Z]{2}$/.test(region) ? region : "";
+  } catch {
+    return "";
+  }
+}
+
 function compact(text) {
   return text.replace(/[^\p{L}\p{N}]/gu, "");
 }
@@ -32,7 +47,9 @@ export default class RadioController {
   #bar;
   #audio = new Audio();
   #current = null;
-  #popularLoaded = false;
+  #loadedSections = new Set();
+  #countriesLoaded = false;
+  #country = browserCountry();
 
   constructor({ app, storage, share }) {
     this.#app = app;
@@ -58,8 +75,9 @@ export default class RadioController {
     }
     const favorites = this.#storage.getRadioFavorites();
     this.#view?.setFavorites(favorites);
-    // Nothing is pre-added: without own stations the tab opens on the popular list (loaded when the tab opens).
-    this.#view?.setSection(favorites.length ? "favorites" : "popular");
+    this.#view?.setPopularCountries(this.#country ? [this.#country] : []);
+    // Nothing is pre-added: without own stations the tab opens on the popular list of the browser's country.
+    this.#view?.setSection(favorites.length ? "favorites" : this.#popularSection());
   }
 
   #bindEvents() {
@@ -68,7 +86,7 @@ export default class RadioController {
       if (event.detail?.query) void this.#search(event.detail.query);
     });
     this.#view?.addEventListener("section-change", (event) => {
-      if (event.detail.section === "popular") void this.#loadPopular();
+      if (event.detail.section.startsWith("popular")) void this.#loadPopular(event.detail.section);
     });
     this.#view?.addEventListener("play-station", (event) => this.#play(event.detail.station));
     this.#view?.addEventListener("toggle-favorite", (event) => this.#toggleFavorite(event.detail.station));
@@ -105,7 +123,9 @@ export default class RadioController {
     });
 
     document.addEventListener("tab-change", (event) => {
-      if (event.detail.tab === "radio" && this.#view?.section === "popular") void this.#loadPopular();
+      if (event.detail.tab !== "radio") return;
+      void this.#loadCountries();
+      if (this.#view?.section.startsWith("popular")) void this.#loadPopular(this.#view.section);
     });
     // Video playback and screen mirroring take over the speakers.
     document.addEventListener("playback-start", () => this.#stop());
@@ -127,16 +147,43 @@ export default class RadioController {
     return items.map((item) => this.#normalize(item));
   }
 
-  async #loadPopular(force = false) {
-    if (this.#popularLoaded && !force) return;
-    this.#view.setStations("popular", { loading: true });
+  #popularSection() {
+    return this.#country ? `popular:${this.#country}` : "popular";
+  }
+
+  /** Section "popular:PL" lists the most listened stations in PL; "popular" lists them worldwide. */
+  async #loadPopular(section) {
+    if (this.#loadedSections.has(section)) return;
+    this.#loadedSections.add(section);
+    this.#view.setStations(section, { loading: true });
     try {
-      // Worldwide, most listened first: the app has no home country.
-      const stations = await this.#fetchStations("");
-      this.#popularLoaded = true;
-      this.#view.setStations("popular", { stations });
+      const code = section.split(":")[1] || "";
+      const stations = await this.#fetchStations(code ? `countrycode=${code}` : "");
+      this.#view.setStations(section, { stations });
     } catch (error) {
-      this.#view.setStations("popular", { error: `Could not load stations (${error.message}).` });
+      this.#loadedSections.delete(section);
+      this.#view.setStations(section, { error: `Could not load stations (${error.message}).` });
+    }
+  }
+
+  /** Adds "Popular in XX" chips for the countries with the most stations, after the browser's own country. */
+  async #loadCountries() {
+    if (this.#countriesLoaded) return;
+    this.#countriesLoaded = true;
+    try {
+      const response = await fetch(`${RADIO_API}/countries?order=stationcount&reverse=true&hidebroken=true`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const codes = (await response.json())
+        .map((country) => String(country.iso_3166_1 || "").toUpperCase())
+        .filter((code) => /^[A-Z]{2}$/.test(code) && code !== this.#country)
+        .slice(0, TOP_COUNTRIES);
+      const section = this.#view.section;
+      this.#view.setPopularCountries([...(this.#country ? [this.#country] : []), ...codes]);
+      this.#view.setSection(section);
+    } catch (error) {
+      // The browser's own country and the worldwide list still work without the country list.
+      this.#countriesLoaded = false;
+      console.warn("[Radio] country list failed", error);
     }
   }
 

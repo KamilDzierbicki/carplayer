@@ -2,19 +2,21 @@
  * <carplayer-radio> - Radio tab: favorites, popular stations and search results as station cards.
  *
  * Methods: setSection(name), setStations(section, {stations, loading, error}), setFavorites(stations),
- *          setNowPlaying(stationId)
+ *          setNowPlaying(stationId), setPopularCountries(codes)
+ * Sections: "favorites", "popular:<country code>" (e.g. "popular:PL"), "popular" (worldwide) and "results".
  * Events: 'search' {query}, 'section-change' {section}, 'play-station' {station}, 'toggle-favorite' {station},
  *         'open-add-station'
  */
-const SECTIONS = Object.freeze([
-  { id: "favorites", label: "My stations" },
-  { id: "popular", label: "Popular" },
+const FIXED_START = [{ id: "favorites", label: "My stations" }];
+const FIXED_END = [
+  { id: "popular", label: "Popular worldwide" },
   { id: "results", label: "Search results" },
-]);
+];
 
 export default class CarplayerRadio extends HTMLElement {
   #rendered = false;
   #section = "favorites";
+  #sections = [...FIXED_START, ...FIXED_END];
   #data = { favorites: { stations: [] }, popular: { stations: [] }, results: { stations: [] } };
   #favoriteIds = new Set();
   #nowPlayingId = "";
@@ -36,9 +38,7 @@ export default class CarplayerRadio extends HTMLElement {
             Add station
           </button>
         </div>
-        <div class="chip-row" data-role="sections">
-          ${SECTIONS.map((section) => `<button class="chip" type="button" data-section="${section.id}">${section.label}</button>`).join("")}
-        </div>
+        <div class="chip-row" data-role="sections"></div>
         <div class="station-grid" data-role="stations"></div>
       </div>
     `;
@@ -74,7 +74,15 @@ export default class CarplayerRadio extends HTMLElement {
   }
 
   setSection(section) {
-    this.#section = SECTIONS.some((entry) => entry.id === section) ? section : "favorites";
+    this.#section = this.#sections.some((entry) => entry.id === section) ? section : "favorites";
+    this.#render();
+  }
+
+  /** One "Popular in XX" chip per country code, in the given order, between My stations and Popular worldwide. */
+  setPopularCountries(codes) {
+    const countries = [...new Set(codes)].map((code) => ({ id: `popular:${code}`, label: `Popular in ${code}` }));
+    this.#sections = [...FIXED_START, ...countries, ...FIXED_END];
+    this.#renderChips();
     this.#render();
   }
 
@@ -98,8 +106,22 @@ export default class CarplayerRadio extends HTMLElement {
     return Object.values(this.#data).flatMap((entry) => entry.stations || []).find((station) => station.id === id);
   }
 
+  #renderChips() {
+    const row = this.querySelector('[data-role="sections"]');
+    if (!row) return;
+    row.replaceChildren(...this.#sections.map((section) => {
+      const chip = document.createElement("button");
+      chip.className = "chip";
+      chip.type = "button";
+      chip.dataset.section = section.id;
+      chip.textContent = section.label;
+      return chip;
+    }));
+  }
+
   #render() {
     if (!this.#rendered) return;
+    if (!this.querySelector('[data-role="sections"] [data-section]')) this.#renderChips();
     this.querySelectorAll("[data-section]").forEach((chip) => {
       chip.classList.toggle("is-active", chip.dataset.section === this.#section);
     });
