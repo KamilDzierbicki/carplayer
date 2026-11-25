@@ -12,7 +12,8 @@ export default class ShareController {
 
   #relaySession = null;
   #relaySessionPromise = null;
-  #relayPollTimer = null;
+  #stopRelayListener = null;
+  #qrCountdowns = new WeakMap();
   #lastRelayFailureReason = "";
 
   #shareSuccessTimeout = null;
@@ -109,30 +110,16 @@ export default class ShareController {
   async openReplyChannel(onPayload) {
     const session = await this.#createRelaySession();
     const chunks = new Map();
-    let timer = null;
-    let closed = false;
-
-    const poll = async () => {
-      if (closed) return;
-      try {
-        const messages = await this.#receiveRelayMessages(session);
-        messages.forEach((raw) => {
-          const payload = this.#reassembleChunk(raw, chunks);
-          if (payload) onPayload(payload);
-        });
-      } catch (error) {
-        console.warn("[relay] Reply poll failed", error);
-      }
-      if (!closed) timer = setTimeout(() => void poll(), 1000);
-    };
-    timer = setTimeout(() => void poll(), 500);
+    const stop = this.#listenRelay(session, (messages) => {
+      messages.forEach((raw) => {
+        const payload = this.#reassembleChunk(raw, chunks);
+        if (payload) onPayload(payload);
+      });
+    }, { pollMs: 1000 });
 
     return {
       target: { sessionId: session.sessionId, writeToken: session.writeToken },
-      close: () => {
-        closed = true;
-        clearTimeout(timer);
-      },
+      close: stop,
     };
   }
 
@@ -486,6 +473,30 @@ export default class ShareController {
     qrContainer.querySelector("img")?.setAttribute("alt", "QR code to open this on your phone");
     qrContainer.setAttribute("role", "img");
     qrContainer.setAttribute("aria-label", "QR code to open this on your phone");
+    if (!this.#isShareMode()) this.#showQrCountdown(qrContainer, this.#relaySession?.expiresAt);
+  }
+
+  /** Shows under a QR code how many seconds its relay session stays valid. */
+  #showQrCountdown(qrContainer, expiresAt) {
+    clearInterval(this.#qrCountdowns.get(qrContainer));
+    let note = qrContainer.nextElementSibling;
+    if (!note?.classList.contains("qr-countdown")) {
+      note = document.createElement("p");
+      note.className = "qr-countdown";
+      qrContainer.after(note);
+    }
+    const expiresAtMs = Date.parse(String(expiresAt || ""));
+    if (!Number.isFinite(expiresAtMs)) {
+      note.remove();
+      return;
+    }
+    const update = () => {
+      const seconds = Math.max(0, Math.ceil((expiresAtMs - Date.now()) / 1000));
+      note.textContent = seconds ? `Code valid for ${seconds} s` : "Code expired. Open this screen again for a new one.";
+      if (!seconds || !note.isConnected) clearInterval(this.#qrCountdowns.get(qrContainer));
+    };
+    update();
+    this.#qrCountdowns.set(qrContainer, setInterval(update, 1000));
   }
 
   #buildRelayUrl(mode) {
@@ -610,54 +621,85 @@ export default class ShareController {
   }
 
   #stopRelayPolling() {
-    if (this.#relayPollTimer) {
-      clearTimeout(this.#relayPollTimer);
-      this.#relayPollTimer = null;
-    }
+    this.#stopRelayListener?.();
+    this.#stopRelayListener = null;
   }
 
   #startRelayPolling() {
     this.#stopRelayPolling();
-
-    const poll = async () => {
-      if (!this.#relaySession) {
-        this.#stopRelayPolling();
-        return;
-      }
-
-      if (!this.#isRelaySessionUsable(this.#relaySession)) {
-        console.warn("[relay] Session is near expiration. Polling paused until re-requested.");
-        this.#stopRelayPolling();
-        return;
-      } else {
+    if (!this.#relaySession) return;
+    this.#stopRelayListener = this.#listenRelay(this.#relaySession, (messages) => {
+      console.log(`[relay] Received ${messages.length} relay payload(s).`);
+      messages.forEach((raw) => {
+        // One bad message must not stop the car from listening to the phone.
         try {
-          await this.#pollRelayMessages(this.#relaySession);
+          const payload = this.#reassembleChunk(raw, this.#incomingChunks);
+          if (payload) this.#handleIncomingPayload(payload);
         } catch (error) {
-          // One bad message or a network hiccup must not stop the car from listening to the phone.
-          console.warn("[relay] Poll failed", error);
+          console.warn("[relay] Payload failed", error);
         }
-      }
-
-      this.#relayPollTimer = setTimeout(() => {
-        void poll();
-      }, 1200);
-    };
-
-    this.#relayPollTimer = setTimeout(() => {
-      void poll();
-    }, 500);
+      });
+    }, { pollMs: 1200 });
   }
 
-  async #pollRelayMessages(session) {
-    const messages = await this.#receiveRelayMessages(session);
-    if (!messages.length) return;
+  /**
+   * Delivers a session's messages to onMessages. A Server-Sent Events stream pushes them the moment the phone sends;
+   * where EventSource is missing, or the stream is refused or cannot connect, polling the receive endpoint takes
+   * over. Returns a function that stops listening.
+   */
+  #listenRelay(session, onMessages, { pollMs }) {
+    let stopped = false;
+    let timer = null;
+    let source = null;
 
-    console.log(`[relay] Received ${messages.length} relay payload(s).`);
+    const poll = async () => {
+      if (stopped) return;
+      try {
+        const messages = await this.#receiveRelayMessages(session);
+        if (messages.length && !stopped) onMessages(messages);
+      } catch (error) {
+        console.warn("[relay] Poll failed", error);
+      }
+      if (!stopped) timer = setTimeout(() => void poll(), pollMs);
+    };
+    const startPolling = () => {
+      if (!stopped && !timer) timer = setTimeout(() => void poll(), 300);
+    };
 
-    messages.forEach((raw) => {
-      const payload = this.#reassembleChunk(raw, this.#incomingChunks);
-      if (payload) this.#handleIncomingPayload(payload);
-    });
+    if (typeof EventSource === "function") {
+      const query = new URLSearchParams({ sid: session.sessionId, rt: session.readToken });
+      source = new EventSource(`${this.#relayApiUrl("/session/stream")}?${query.toString()}`);
+      let opened = false;
+      source.addEventListener("open", () => {
+        opened = true;
+      });
+      source.addEventListener("message", (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          const messages = (Array.isArray(data?.messages) ? data.messages : []).map((entry) => entry?.payload ?? entry);
+          if (messages.length && !stopped) onMessages(messages);
+        } catch (error) {
+          console.warn("[relay] Stream message failed", error);
+        }
+      });
+      // The session ran out: nothing more can arrive, and the QR code renews itself with a new session.
+      source.addEventListener("expired", () => source.close());
+      source.addEventListener("error", () => {
+        // A stream that dropped after opening reconnects on its own; one that never opened, or was refused, polls.
+        if (opened && source.readyState !== EventSource.CLOSED) return;
+        source.close();
+        console.warn("[relay] Stream unavailable; polling instead.");
+        startPolling();
+      });
+    } else {
+      startPolling();
+    }
+
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+      source?.close();
+    };
   }
 
   async #receiveRelayMessages(session) {

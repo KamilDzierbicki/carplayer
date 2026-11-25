@@ -29,6 +29,11 @@ var (
 	maxSessions            = getEnvAsInt("MAX_SESSIONS", 1000)
 	createPerMinutePerIP   = getEnvAsInt("CREATE_PER_MINUTE_PER_IP", 30)
 	sendPerMinutePerIP     = getEnvAsInt("SEND_PER_MINUTE_PER_IP", 120)
+	// Open Server-Sent Events streams: a car keeps one per QR code shown, plus a reply channel for mirroring.
+	streamsPerIP           = getEnvAsInt("STREAMS_PER_IP", 8)
+	maxStreams             = getEnvAsInt("MAX_STREAMS", 1000)
+	// Cloudflare closes a proxied connection after about 100 s without data, so the stream sends a comment sooner.
+	streamHeartbeat        = time.Duration(getEnvAsInt("STREAM_HEARTBEAT_SECONDS", 25)) * time.Second
 	allowedOrigins         []string
 	allowedOriginsIncludesAny bool
 )
@@ -78,6 +83,37 @@ type Session struct {
 	WriteToken  string
 	ExpiresAtMs int64
 	Queue       []Message
+	// Signalled on every send, so an open stream pushes the message at once instead of waiting for a poll.
+	notify chan struct{}
+}
+
+// streamCounter caps open streams per client IP and in total; each one holds a connection and a goroutine.
+type streamCounter struct {
+	sync.Mutex
+	total int
+	perIP map[string]int
+}
+
+var streams = &streamCounter{perIP: make(map[string]int)}
+
+func (c *streamCounter) acquire(ip string) bool {
+	c.Lock()
+	defer c.Unlock()
+	if c.total >= maxStreams || c.perIP[ip] >= streamsPerIP {
+		return false
+	}
+	c.total++
+	c.perIP[ip]++
+	return true
+}
+
+func (c *streamCounter) release(ip string) {
+	c.Lock()
+	defer c.Unlock()
+	c.total--
+	if c.perIP[ip]--; c.perIP[ip] <= 0 {
+		delete(c.perIP, ip)
+	}
 }
 
 var (
@@ -279,6 +315,7 @@ func handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		WriteToken:  writeToken,
 		ExpiresAtMs: expiresAtMs,
 		Queue:       make([]Message, 0),
+		notify:      make(chan struct{}, 1),
 	}
 	sessions.Store(sessionID, sess)
 
@@ -366,6 +403,10 @@ func handleSendSession(w http.ResponseWriter, r *http.Request) {
 		sess.Queue = sess.Queue[1:]
 	}
 	sess.Unlock()
+	select {
+	case sess.notify <- struct{}{}:
+	default: // a wake-up is already pending
+	}
 
 	// Important: sync.Map stores pointers here. We don't strictly need to re-store it, 
 	// but keeping the logic clean.
@@ -377,6 +418,96 @@ func handleSendSession(w http.ResponseWriter, r *http.Request) {
 		"ok":      true,
 		"queued":  len(sess.Queue),
 	})
+}
+
+// takeMessages removes up to limit queued messages, oldest first.
+func takeMessages(sess *Session, limit int) []Message {
+	sess.Lock()
+	defer sess.Unlock()
+	take := limit
+	if take > len(sess.Queue) {
+		take = len(sess.Queue)
+	}
+	messages := sess.Queue[:take]
+	sess.Queue = sess.Queue[take:]
+	return messages
+}
+
+// handleStreamSession pushes queued messages to the reader as Server-Sent Events ("data: {messages}") the moment
+// they arrive, sends a heartbeat comment every streamHeartbeat, and ends with an "expired" event when the session
+// expires. The read token travels in the query, because EventSource cannot send headers.
+func handleStreamSession(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "GET" {
+		http.Error(w, `{"error":"Method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+	query := r.URL.Query()
+	sessionID := strings.TrimSpace(query.Get("sid"))
+	readToken := strings.TrimSpace(query.Get("rt"))
+	if sessionID == "" || readToken == "" {
+		http.Error(w, `{"error":"sid and rt are required."}`, http.StatusBadRequest)
+		return
+	}
+	sess, status, errMsg := getSession(sessionID)
+	if sess == nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, errMsg), status)
+		return
+	}
+	if !tokensEqual(readToken, sess.ReadToken) {
+		http.Error(w, `{"error":"Invalid read token."}`, http.StatusUnauthorized)
+		return
+	}
+	ip := clientIP(r)
+	if !streams.acquire(ip) {
+		tooManyRequests(w)
+		return
+	}
+	defer streams.release(ip)
+
+	controller := http.NewResponseController(w)
+	// The server's WriteTimeout would cut a long stream: each write gets its own short deadline instead.
+	write := func(chunk string) bool {
+		_ = controller.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		if _, err := w.Write([]byte(chunk)); err != nil {
+			return false
+		}
+		return controller.Flush() == nil
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	if !write(": connected\n\n") {
+		return
+	}
+
+	heartbeat := time.NewTicker(streamHeartbeat)
+	defer heartbeat.Stop()
+	expiry := time.NewTimer(time.Until(time.UnixMilli(sess.ExpiresAtMs)))
+	defer expiry.Stop()
+
+	for {
+		if messages := takeMessages(sess, 20); len(messages) > 0 {
+			data, _ := json.Marshal(map[string]interface{}{"messages": messages})
+			if !write("data: " + string(data) + "\n\n") {
+				return
+			}
+			continue
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-sess.notify:
+		case <-heartbeat.C:
+			if !write(": ping\n\n") {
+				return
+			}
+		case <-expiry.C:
+			write("event: expired\ndata: {}\n\n")
+			return
+		}
+	}
 }
 
 func handleReceiveSession(w http.ResponseWriter, r *http.Request) {
@@ -423,16 +554,7 @@ func handleReceiveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// splice equivalent
-	sess.Lock()
-	take := limit
-	if take > len(sess.Queue) {
-		take = len(sess.Queue)
-	}
-
-	messages := sess.Queue[:take]
-	sess.Queue = sess.Queue[take:]
-	sess.Unlock()
+	messages := takeMessages(sess, limit)
 
 	updateSession(sessionID, sess)
 
@@ -466,6 +588,7 @@ func main() {
 	mux.HandleFunc("/api/relay/session/create", corsMiddleware(handleCreateSession))
 	mux.HandleFunc("/api/relay/session/send", corsMiddleware(handleSendSession))
 	mux.HandleFunc("/api/relay/session/receive", corsMiddleware(handleReceiveSession))
+	mux.HandleFunc("/api/relay/session/stream", corsMiddleware(handleStreamSession))
 
 	fs := http.FileServer(http.Dir(absStaticRoot))
 	

@@ -1063,6 +1063,15 @@
     transition: inline-size var(--dur-ui) var(--ease-out-expo);
   }
 
+  /* Seconds left before the relay session behind a QR code expires */
+  .qr-countdown {
+    margin: var(--space-2) 0 0;
+    color: var(--color-muted);
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+  }
+
   .qr-panel,
   .qr-card {
     display: inline-block;
