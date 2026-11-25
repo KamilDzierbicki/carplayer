@@ -2,7 +2,7 @@ const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
 const ICE_GATHER_TIMEOUT_MS = 4000;
 
 /**
- * Screen mirroring from a laptop browser to the car.
+ * Screen mirroring from a phone or laptop browser to the car.
  *
  * Signaling uses the HTTP relay (one offer and one answer, with all ICE candidates gathered up front).
  * The car never plays the stream in <video>, which the car blocks while driving: video frames are read with
@@ -42,7 +42,7 @@ export default class MirrorController {
     document.getElementById("btnShareMirrorLink")?.addEventListener("click", () => void this.#shareLinkToLaptop());
     document.addEventListener("modal-open", (event) => {
       if (event.target?.id !== "mirrorSenderModal" || navigator.mediaDevices?.getDisplayMedia) return;
-      // Scanned on a phone: it cannot share its screen, so offer to pass the link on to a laptop.
+      // A browser that cannot share its screen (some phones) offers to pass the link on to a laptop.
       document.getElementById("btnStartMirror")?.classList.add("hidden");
       document.getElementById("btnShareMirrorLink")?.classList.remove("hidden");
       this.#setSenderStatus("This device cannot share its screen. Open this page on a laptop instead.");
@@ -58,7 +58,7 @@ export default class MirrorController {
     if (!offerSdp || !reply?.sessionId || !reply?.writeToken) return;
 
     this.#stopReceiver();
-    this.#setPanelStatus("Laptop found. Connecting...");
+    this.#setPanelStatus("Device found. Connecting...");
 
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
     this.#receiver = { pc, stopRender: null };
@@ -84,7 +84,7 @@ export default class MirrorController {
       await pc.setLocalDescription(await pc.createAnswer());
       await waitForIceGathering(pc);
       const sent = await this.#share.sendToSession(reply, { type: "mirror-answer", value: { sdp: pc.localDescription.sdp } });
-      if (!sent) throw new Error("Could not send the answer to the laptop.");
+      if (!sent) throw new Error("Could not send the answer to the sharing device.");
     } catch (error) {
       console.error("[Mirror] receiver failed", error);
       this.#setPanelStatus(`Mirroring failed: ${error.message}`);
@@ -158,11 +158,11 @@ export default class MirrorController {
     if (status) status.textContent = text;
   }
 
-  // ── Laptop side ──────────────────────────────────────
+  // ── Sender side (phone or laptop) ────────────────────
 
   async #startSender() {
     if (!navigator.mediaDevices?.getDisplayMedia) {
-      this.#setSenderStatus("This browser cannot share its screen. Use Chrome, Edge or Firefox on a computer.");
+      this.#setSenderStatus("This browser cannot share its screen. Open this page on a laptop instead.");
       return;
     }
     this.#stopSender();

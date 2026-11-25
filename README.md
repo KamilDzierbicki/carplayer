@@ -42,7 +42,7 @@ entertainment restrictions.
 
 - Send links and settings from your phone with a QR code, without typing long URLs in the car.
 - Open link: send any web page from your phone and open it in the car browser.
-- Mirror: show a laptop screen in the car.
+- Mirror: show a phone or laptop screen in the car.
 - Move all settings between devices with "Move settings" on the About page.
 
 ## Relay backend (VPS)
