@@ -206,6 +206,8 @@
     flex-direction: column;
     background: var(--color-canvas);
     overflow-y: auto;
+    /* Keeps the scrollbar's space on short tabs too, so switching tabs does not change the content width */
+    scrollbar-gutter: stable;
     transition: opacity var(--dur-panel) var(--ease-out-expo);
   }
 
