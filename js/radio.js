@@ -1,8 +1,16 @@
+import { withCorsProxy } from "./cors-proxy.js";
+
 // radio-browser.info: free community station directory with CORS. "all." resolves to one of its mirrors.
 const RADIO_API = "https://all.api.radio-browser.info/json";
 const LIST_QUERY = "order=clickcount&reverse=true&hidebroken=true&limit=60";
 // "Popular in XX" chips after the listener's own country: the directory's countries with the most stations.
 const TOP_COUNTRIES = 12;
+// An address that has not started playing by then is given up for the next one (some HTTPS ports never answer).
+const FALLBACK_AFTER_MS = 8000;
+// Favorites saved by earlier versions carry this reason; such stations now play over HTTPS or through the proxy.
+const OLD_HTTP_REASON = "Plain HTTP stream, blocked on this HTTPS page.";
+const NEEDS_PROXY_MESSAGE = "This station streams only over plain HTTP, which the browser blocks here. "
+  + "Add your CORS proxy in the Tube or IPTV settings to play it.";
 
 // Stations missing from radio-browser.info. They only join search results that match their name: nothing is shown
 // or added to "My stations" without the user's search and tap.
@@ -47,6 +55,14 @@ export default class RadioController {
   #bar;
   #audio = new Audio();
   #current = null;
+  // Stream addresses still to try for the current station, the timer that moves on to them, whether the station
+  // has started playing at all, and whether it is an HTTP-only station that would need a proxy nobody set up.
+  #fallbacks = [];
+  #fallbackTimer = 0;
+  #started = false;
+  #needsProxy = false;
+  // Station URL -> the address that last played it, so a known HTTP-only station skips the HTTPS attempt.
+  #workingUrls = new Map();
   #loadedSections = new Set();
   #countriesLoaded = false;
   #country = browserCountry();
@@ -72,6 +88,12 @@ export default class RadioController {
     // Earlier versions put the featured list into "My stations" automatically ("default-" ids); take those out once.
     if (this.#storage.takeRadioDefaultsFlag()) {
       this.#storage.saveRadioFavorites(this.#storage.getRadioFavorites().filter((station) => !String(station.id).startsWith("default-")));
+    }
+    const saved = this.#storage.getRadioFavorites();
+    if (saved.some((station) => station.unplayableReason === OLD_HTTP_REASON)) {
+      this.#storage.saveRadioFavorites(saved.map((station) => (station.unplayableReason === OLD_HTTP_REASON
+        ? { ...station, playable: Boolean(station.url), unplayableReason: "" }
+        : station)));
     }
     const favorites = this.#storage.getRadioFavorites();
     this.#view?.setFavorites(favorites);
@@ -135,7 +157,9 @@ export default class RadioController {
     this.#bar?.addEventListener("radio-stop", () => this.#stop());
     this.#bar?.addEventListener("radio-favorite", () => this.#current && this.#toggleFavorite(this.#current));
 
-    ["playing", "pause", "waiting", "error"].forEach((type) => {
+    this.#audio.addEventListener("playing", () => this.#onPlaying());
+    this.#audio.addEventListener("error", () => this.#onStreamError());
+    ["pause", "waiting"].forEach((type) => {
       this.#audio.addEventListener(type, () => this.#syncBar());
     });
   }
@@ -238,14 +262,71 @@ export default class RadioController {
       return;
     }
     this.#current = station;
-    this.#audio.src = station.url;
+    this.#started = false;
     this.#audio.volume = Math.min(1, Math.max(0, this.#storage.getVolume()));
+    this.#view?.setNowPlaying(station.id);
+    const urls = this.#streamUrls(station.url);
+    this.#needsProxy = urls.length === 1 && urls[0] !== station.url;
+    this.#tryStream(urls);
+  }
+
+  /**
+   * Addresses to try for a station, best first. An HTTPS page cannot load plain HTTP audio, so an http:// station
+   * tries the same address over HTTPS (many servers have it) and then the user's CORS proxy, which serves it over
+   * HTTPS. The address that played last time goes first.
+   */
+  #streamUrls(url) {
+    if (window.location.protocol !== "https:" || !url.startsWith("http:")) return [url];
+    const proxy = this.#storage.getTubeConfig().proxyUrl || this.#storage.getIptvConfig().corsProxy;
+    const urls = [`https:${url.slice("http:".length)}`, ...(proxy ? [withCorsProxy(url, proxy)] : [])];
+    const known = this.#workingUrls.get(url);
+    return urls.includes(known) ? [known, ...urls.filter((entry) => entry !== known)] : urls;
+  }
+
+  #tryStream([url, ...fallbacks]) {
+    clearTimeout(this.#fallbackTimer);
+    this.#fallbacks = fallbacks;
+    if (fallbacks.length || this.#needsProxy) {
+      this.#fallbackTimer = setTimeout(() => this.#onStreamError(), FALLBACK_AFTER_MS);
+    }
+    this.#audio.src = url;
     this.#audio.play().catch((error) => {
+      // A failed address also fires "error", which moves on; AbortError means another address replaced this one.
+      if (error.name === "NotSupportedError" || error.name === "AbortError") return;
       console.warn("[Radio] play failed", error);
       this.#syncBar(`Cannot play this station (${error.message}).`);
     });
-    this.#view?.setNowPlaying(station.id);
     this.#syncBar("Connecting...");
+  }
+
+  #onPlaying() {
+    clearTimeout(this.#fallbackTimer);
+    this.#fallbacks = [];
+    if (this.#current && !this.#started) {
+      this.#started = true;
+      this.#workingUrls.set(this.#current.url, this.#audio.src);
+    }
+    this.#syncBar();
+  }
+
+  #onStreamError() {
+    if (!this.#current) return;
+    if (this.#fallbacks.length) {
+      this.#tryStream(this.#fallbacks);
+      return;
+    }
+    clearTimeout(this.#fallbackTimer);
+    this.#workingUrls.delete(this.#current.url);
+    if (!this.#needsProxy || this.#started) {
+      this.#syncBar();
+      return;
+    }
+    // The HTTPS attempt failed or never answered: stop it, so it cannot start playing after the alert.
+    this.#audio.pause();
+    this.#audio.removeAttribute("src");
+    this.#audio.load();
+    this.#syncBar("Needs a CORS proxy.");
+    alert(NEEDS_PROXY_MESSAGE);
   }
 
   #togglePlay() {
@@ -260,6 +341,8 @@ export default class RadioController {
 
   #stop() {
     if (!this.#current) return;
+    clearTimeout(this.#fallbackTimer);
+    this.#fallbacks = [];
     this.#audio.pause();
     this.#audio.removeAttribute("src");
     this.#audio.load();
@@ -281,8 +364,6 @@ export default class RadioController {
     let unplayableReason = "";
     if (Number(item.hls) === 1) {
       unplayableReason = "HLS radio streams are not supported.";
-    } else if (window.location.protocol === "https:" && url.startsWith("http:")) {
-      unplayableReason = "Plain HTTP stream, blocked on this HTTPS page.";
     }
 
     return {
