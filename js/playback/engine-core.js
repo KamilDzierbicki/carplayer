@@ -64,8 +64,8 @@ async function pickTranscodeTarget() {
  * else (no RESOLUTION) the richest. Returns '' for a media playlist, or, unless `allowSeparateAudio`, for a master
  * whose audio lives in its own renditions (opening one variant alone would then lose the sound).
  */
-async function pickHlsVariantUrl(masterUrl, {allowSeparateAudio = true} = {}) {
-	const response = await fetch(masterUrl);
+async function pickHlsVariantUrl(masterUrl, {allowSeparateAudio = true, fetchFn = fetch} = {}) {
+	const response = await fetchFn(masterUrl);
 	if(!response.ok) return '';
 	const text = await response.text();
 	if(!allowSeparateAudio && /#EXT-X-MEDIA:[^\n]*TYPE=AUDIO[^\n]*URI=/i.test(text)) return '';
@@ -348,9 +348,10 @@ export class SourceFactory {
 		return QUALITY_PROFILE_MAP[this.normalizeQualityId(qualityId)] || QUALITY_PROFILE_MAP['720'];
 	}
 
-	async createDirectBundle({url, selectedTrackId = ''}) {
+	/** @param {{url: string, selectedTrackId?: string, fetchFn?: typeof fetch}} options fetchFn routes every request (playlists and segments) through a proxy */
+	async createDirectBundle({url, selectedTrackId = '', fetchFn = undefined}) {
 		await loadMediabunny();
-		const {input, videoTrack} = await this.#openDirectInput(url);
+		const {input, videoTrack} = await this.#openDirectInput(url, fetchFn);
 		const pairableAudioTrack = typeof videoTrack?.getPrimaryPairableAudioTrack === 'function'
 			? await videoTrack.getPrimaryPairableAudioTrack()
 			: null;
@@ -537,13 +538,15 @@ export class SourceFactory {
 		};
 	}
 
-	async #openDirectInput(url) {
+	async #openDirectInput(url, fetchFn = undefined) {
 		// While starting, a failing request gives up after two retries so offline or dead links show an error instead
 		// of loading forever; once playing, retries continue (with backoff) to ride out short LTE drops.
 		const retry = {starting: true};
 		const open = (sourceUrl) => new MB.Input({
 			source: new MB.UrlSource(sourceUrl, {
 				getRetryDelay: (previousAttempts) => (retry.starting && previousAttempts >= 2 ? null : Math.min(2 ** previousAttempts, 8)),
+				// Relative HLS paths still resolve against the original URL; only the request goes through fetchFn.
+				...(fetchFn ? {fetchFn} : {}),
 			}),
 			// HLS_FORMATS lets the same path play .m3u8 playlists (IPTV, live streams).
 			formats: [...new Set([...MB.ALL_FORMATS, ...MB.HLS_FORMATS])],
@@ -558,7 +561,7 @@ export class SourceFactory {
 		// variant's size downloads test segments of all of them before the first frame (about 25 s on slow LTE).
 		let startUrl = url;
 		if(/\.m3u8?$/i.test(new URL(url, location.href).pathname)) {
-			startUrl = await pickHlsVariantUrl(url, {allowSeparateAudio: false}).catch(() => '') || url;
+			startUrl = await pickHlsVariantUrl(url, {allowSeparateAudio: false, fetchFn}).catch(() => '') || url;
 		}
 
 		const input = open(startUrl);
@@ -569,7 +572,7 @@ export class SourceFactory {
 			// tracks (e.g. MP3 + E-AC-3) is then rejected. Opened directly, the variant playlist plays fine.
 			if(!/(multiple|several) (audio|video) codecs/i.test(String(error?.message))) throw error;
 			input.dispose?.();
-			const variantUrl = await pickHlsVariantUrl(url);
+			const variantUrl = await pickHlsVariantUrl(url, {fetchFn});
 			if(!variantUrl) throw error;
 			return opened(open(variantUrl));
 		}

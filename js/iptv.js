@@ -42,6 +42,11 @@ export default class IptvController {
     this.#playChannel(favorite);
   }
 
+  /** Plays a saved channel (history entry) the same way as one picked from the list. */
+  playUrl(url, name, logo = "") {
+    this.#playChannel({ url, name, logo });
+  }
+
   #bindEvents() {
     if (!this.#view) return;
 
@@ -229,15 +234,24 @@ export default class IptvController {
   }
 
   #playChannel(channel) {
+    // An HTTPS page cannot load plain HTTP streams, so every request of such a channel goes through the CORS proxy.
+    let fetchFn;
     if (window.location.protocol === "https:" && channel.url.startsWith("http:")) {
-      alert("This channel uses plain HTTP. The browser blocks HTTP streams on an HTTPS page, so it cannot play here.");
-      return;
+      const proxy = this.#storage.getIptvConfig().corsProxy || this.#storage.getTubeConfig().proxyUrl;
+      if (!proxy) {
+        alert("This channel uses plain HTTP, which the browser blocks on an HTTPS page. Set a CORS proxy in IPTV settings to play it.");
+        return;
+      }
+      fetchFn = (input, init) => (input instanceof Request
+        ? fetch(new Request(withCorsProxy(input.url, proxy), input), init)
+        : fetch(withCorsProxy(String(input), proxy), init));
     }
 
     void this.#player.loadVideo(channel.url, {
       title: channel.name,
       sourceType: "iptv",
       thumbnailUrl: channel.logo,
+      fetchFn,
     });
   }
 }

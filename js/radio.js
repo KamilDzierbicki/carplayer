@@ -257,7 +257,8 @@ export default class RadioController {
   }
 
   #play(station) {
-    if (!station.playable) {
+    // Stations saved before HLS support carry the old "not supported" flag; <audio> plays HLS natively now.
+    if (!station.playable && !/^HLS radio streams/.test(String(station.unplayableReason || ""))) {
       alert(station.unplayableReason);
       return;
     }
@@ -362,9 +363,6 @@ export default class RadioController {
   #normalize(item) {
     const url = String(item.url_resolved || item.url || "");
     let unplayableReason = "";
-    if (Number(item.hls) === 1) {
-      unplayableReason = "HLS radio streams are not supported.";
-    }
 
     return {
       id: String(item.stationuuid || url),

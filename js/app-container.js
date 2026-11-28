@@ -113,6 +113,10 @@ export default class AppContainer {
     const isTube = ["tube", "youtube"].includes(entry.sourceType);
     const tubeId = isTube ? entry.id.match(this.#app.tubeLinkRegex)?.[1] : "";
     if (tubeId) return this.#featureControllers.tube.play(tubeId, entry.title);
+    // IPTV goes through its controller, which routes HTTP channels through the CORS proxy.
+    if (entry.sourceType === "iptv") {
+      return this.#featureControllers.iptv.playUrl(entry.id, entry.title, entry.thumbnailUrl);
+    }
     return this.#playerController.loadVideo(entry.id, {
       title: entry.title,
       sourceType: entry.sourceType,

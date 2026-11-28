@@ -983,6 +983,7 @@ export default class PlayerController {
 			bundle = await this.sourceFactory.createDirectBundle({
 				url: this.sourceContext.url,
 				selectedTrackId: this.sourceContext.directAudioTrackId || '',
+				fetchFn: this.sourceContext.fetchFn,
 			});
 
 			this.selectedDirectTrackId = bundle.selectedAudioTrackId;
@@ -1288,6 +1289,7 @@ export default class PlayerController {
 			url: normalizedUrl,
 			directAudioTrackId: '',
 			quality: this.selectedQuality,
+			fetchFn: options.fetchFn,
 		}, {
 			url: historyId,
 			title,
