@@ -316,6 +316,9 @@ const speedWidget = {
 const GRAVITY = 9.80665;
 const G_RANGE = 1.2; // outer edge of the meter in g
 const TRAIL_MS = 1500;
+// Redraw cap for the meter: sensors fire up to 60 times a second, but 15 frames a second looks smooth here and
+// costs a quarter of the canvas work on the car's CPU.
+const GFORCE_FRAME_MS = 66;
 
 /**
  * Sports-car style G-meter from the browser's motion sensors (phone in the car; the car screen itself
@@ -355,6 +358,20 @@ const gForceWidget = {
     let baseOrientation = null;
     let gotMotion = false;
     let frame = 0;
+    let lastDraw = 0;
+    let lastPeaksRender = 0;
+    let onScreen = false;
+
+    // Visible to the driver: page in front, widget scrolled into view, no player covering the dashboard.
+    const isVisible = () => document.visibilityState === "visible" && onScreen && !canvas.closest(".hidden");
+
+    // Draws on demand (new sensor data, resize, theme change), never in an endless loop, at most every
+    // GFORCE_FRAME_MS, and only while visible: a car browser has no motion sensors, and a canvas redrawn
+    // 60 times a second for nothing costs real CPU there.
+    const requestDraw = () => {
+      if (frame || !isVisible()) return;
+      frame = setTimeout(draw, Math.max(0, lastDraw + GFORCE_FRAME_MS - performance.now()));
+    };
 
     const renderPeaks = () => {
       peaks.replaceChildren(
@@ -412,16 +429,21 @@ const gForceWidget = {
         left: Math.max(peak.left, -smoothed.lat),
         right: Math.max(peak.right, smoothed.lat),
       };
+      trail.push({ lat: smoothed.lat, lon: smoothed.lon, time: performance.now() });
+      requestDraw();
     };
 
     const onOrientation = (event) => {
       if (event.beta === null) return;
       orientation = { pitch: event.beta, roll: event.gamma };
       if (!baseOrientation) baseOrientation = { ...orientation };
+      requestDraw();
     };
 
     const draw = () => {
-      frame = requestAnimationFrame(draw);
+      frame = 0;
+      if (!isVisible()) return;
+      lastDraw = performance.now();
       const styles = getComputedStyle(body);
       const ink = styles.getPropertyValue("--color-ink").trim() || "#fff";
       const muted = styles.getPropertyValue("--color-muted").trim() || "#999";
@@ -468,18 +490,21 @@ const gForceWidget = {
       ctx.fillText("1 g", c + toPx(1) - 10, c - 4);
 
       // Felt force: opposite to the car's acceleration.
-      const x = c + toPx(Math.max(-G_RANGE, Math.min(G_RANGE, -smoothed.lat)));
-      const y = c + toPx(Math.max(-G_RANGE, Math.min(G_RANGE, smoothed.lon)));
+      const toPoint = (lat, lon) => [
+        c + toPx(Math.max(-G_RANGE, Math.min(G_RANGE, -lat))),
+        c + toPx(Math.max(-G_RANGE, Math.min(G_RANGE, lon))),
+      ];
+      const [x, y] = toPoint(smoothed.lat, smoothed.lon);
       const time = performance.now();
-      trail.push({ x, y, time });
       trail = trail.filter((point) => time - point.time < TRAIL_MS);
 
       trail.forEach((point, index) => {
         const age = (time - point.time) / TRAIL_MS;
+        const [px, py] = toPoint(point.lat, point.lon);
         ctx.globalAlpha = Math.max(0, 0.5 * (1 - age));
         ctx.fillStyle = accent;
         ctx.beginPath();
-        ctx.arc(point.x, point.y, 3 + 2 * (index / trail.length), 0, Math.PI * 2);
+        ctx.arc(px, py, 3 + 2 * (index / trail.length), 0, Math.PI * 2);
         ctx.fill();
       });
       ctx.globalAlpha = 1;
@@ -497,7 +522,12 @@ const gForceWidget = {
         const roll = orientation.roll - baseOrientation.roll;
         tilt.textContent = `Pitch ${pitch.toFixed(0)}° · Roll ${roll.toFixed(0)}°`;
       }
-      if (frame % 15 === 0) renderPeaks();
+      if (time - lastPeaksRender > 250) {
+        lastPeaksRender = time;
+        renderPeaks();
+      }
+      // Keep animating only while the trail is still fading out.
+      if (trail.length) requestDraw();
     };
 
     const start = () => {
@@ -541,9 +571,25 @@ const gForceWidget = {
       renderPeaks();
     });
 
-    frame = requestAnimationFrame(draw);
+    // Redraw the static dial when the widget gets its size or the light/dark theme changes.
+    const resizeObserver = new ResizeObserver(() => requestDraw());
+    resizeObserver.observe(body);
+    const themeObserver = new MutationObserver(() => requestDraw());
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const intersectionObserver = new IntersectionObserver(([entry]) => {
+      onScreen = entry.isIntersecting;
+      requestDraw();
+    });
+    intersectionObserver.observe(canvas);
+    const onVisibilityChange = () => requestDraw();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
-      cancelAnimationFrame(frame);
+      clearTimeout(frame);
+      resizeObserver.disconnect();
+      themeObserver.disconnect();
+      intersectionObserver.disconnect();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("devicemotion", onMotion);
       window.removeEventListener("deviceorientation", onOrientation);
     };
